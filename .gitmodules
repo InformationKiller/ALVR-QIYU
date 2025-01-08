@@ -1,0 +1,3 @@
+[submodule "QiyuNativeSDK"]
+	path = QiyuNativeSDK
+	url = https://github.com/hallychou/QiyuNativeSDK.git
