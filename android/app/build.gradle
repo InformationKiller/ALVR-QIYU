@@ -62,4 +62,13 @@ dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar', '*.so'])
     implementation 'androidx.appcompat:appcompat:1.5.1'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+
+    debugImplementation(name: 'sxrApi-v8a-debug', ext: 'aar')
+    releaseImplementation(name: 'sxrApi-v8a-release', ext: 'aar')
+
+    debugImplementation(name: 'qiyivrsdkcore-v8a-debug', ext: 'aar')
+    releaseImplementation(name: 'qiyivrsdkcore-v8a-release', ext: 'aar')
+
+    debugImplementation(name: 'qiyuapi-v8a-debug', ext: 'aar')
+    releaseImplementation(name: 'qiyuapi-v8a-release', ext: 'aar')
 }

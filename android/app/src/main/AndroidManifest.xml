@@ -16,12 +16,10 @@
         android:glEsVersion="0x00030001"
         android:required="true" />
 
-    <uses-permission android:name="oculus.permission.handtracking" />
-    <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
-    <uses-permission android:name="com.oculus.permission.WIFI_LOCK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <application
         android:extractNativeLibs="true"
@@ -43,6 +41,8 @@
             android:value="HIGH" />
         <meta-data android:name="com.oculus.handtracking.version"
             android:value="V2.0"/>
+        <meta-data android:name="native-sdk-version"
+            android:value="1.0.0"/>
 
         <activity
             android:name="alvr.client.VRActivity"

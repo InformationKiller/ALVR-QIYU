@@ -512,12 +512,14 @@ async fn stream_pipeline(
             loop {
                 let packet = receiver.recv().await?.header;
 
-                EVENT_QUEUE.lock().push_back(AlvrEvent::Haptics {
-                    device_id: packet.path,
-                    duration_s: packet.duration.as_secs_f32(),
-                    frequency: packet.frequency,
-                    amplitude: packet.amplitude,
-                });
+                if packet.frequency >= 0.001 {
+                    EVENT_QUEUE.lock().push_back(AlvrEvent::Haptics {
+                        device_id: packet.path,
+                        duration_s: packet.duration.as_secs_f32(),
+                        frequency: packet.frequency,
+                        amplitude: packet.amplitude,
+                    });
+                }
             }
         }
     };

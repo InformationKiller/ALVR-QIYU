@@ -1,4 +1,9 @@
-<p align="center"> <img width="500" src="resources/alvr_combined_logo_hq.png"/> </p>
+<img src="https://github.com/alvr-org/ALVR/raw/master/resources/ALVR-Grey.svg" title="" alt="ALVR" width="100">
+<img src="https://pic1.iqiyipic.com/lequ/20220823/logo-en-white.png" title="" alt="QIYU" width="200">
+
+# ALVR for QIYU
+
+Note: This is a modified version of ALVR, which only supports QIYU Dream series (including Lenovo Legion VR700) and QIYU 3.
 
 # ALVR - Air Light VR
 

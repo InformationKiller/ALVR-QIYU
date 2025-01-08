@@ -22,6 +22,6 @@ target_link_libraries(
         GLESv3
         EGL
         android
-        vrapi
+        qiyuapi
         alvr_client_core
         )

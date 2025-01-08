@@ -1,4 +1,4 @@
-#include "VrApi.h"
+// #include "VrApi.h"
 #include "VrApi_Helpers.h"
 #include "VrApi_Input.h"
 #include "alvr_client_core.h"
@@ -12,6 +12,8 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <time.h>
+#include "QiyuApi.h"
 
 void log(AlvrLogLevel level, const char *format, ...) {
     va_list args;
@@ -31,6 +33,38 @@ void log(AlvrLogLevel level, const char *format, ...) {
 
 #define error(...) log(ALVR_LOG_LEVEL_ERROR, __VA_ARGS__)
 #define info(...) log(ALVR_LOG_LEVEL_INFO, __VA_ARGS__)
+
+static const char *GlErrorString(GLenum error) {
+    switch (error) {
+    case GL_NO_ERROR:
+        return "GL_NO_ERROR";
+    case GL_INVALID_ENUM:
+        return "GL_INVALID_ENUM";
+    case GL_INVALID_VALUE:
+        return "GL_INVALID_VALUE";
+    case GL_INVALID_OPERATION:
+        return "GL_INVALID_OPERATION";
+    case GL_INVALID_FRAMEBUFFER_OPERATION:
+        return "GL_INVALID_FRAMEBUFFER_OPERATION";
+    case GL_OUT_OF_MEMORY:
+        return "GL_OUT_OF_MEMORY";
+    default:
+        return "unknown";
+    }
+}
+
+[[maybe_unused]] static void GLCheckErrors(const char *file, int line) {
+    const GLenum error = glGetError();
+    if (error == GL_NO_ERROR) {
+        return;
+    }
+    error("GL error on %s : %d: %s", file, line, GlErrorString(error));
+    abort();
+}
+
+#define GL(func)                                                                                   \
+    func;                                                                                          \
+    GLCheckErrors(__FILE__, __LINE__)
 
 uint64_t HEAD_ID = alvr_path_string_to_hash("/user/head");
 uint64_t LEFT_HAND_ID = alvr_path_string_to_hash("/user/hand/left");
@@ -81,6 +115,8 @@ const float IPD_EPS = 0.001; // minimum change of IPD to be registered as a new 
 
 const GLenum SWAPCHAIN_FORMAT = GL_RGBA8;
 
+static float g_fTrackingOffset = 0.0f;//FIXME!
+
 struct Render_EGL {
     EGLDisplay Display;
     EGLConfig Config;
@@ -115,11 +151,15 @@ public:
 
     uint64_t ovrFrameIndex = 0;
 
-    std::deque<std::pair<uint64_t, ovrTracking2>> trackingFrameMap;
+    std::deque<std::pair<uint64_t, qiyu_HeadPoseState>> trackingFrameMap;
     std::mutex trackingFrameMutex;
 
-    Swapchain lobbySwapchains[2] = {};
-    Swapchain streamSwapchains[2] = {};
+    // Swapchain lobbySwapchains[2] = {};
+    // Swapchain streamSwapchains[2] = {};
+
+    // Use one texture per eye, no need for swapchains.
+    GLuint lobbyTextures[2] = {0, 0};
+    GLuint streamTextures[2] = {0, 0};
 
     uint8_t hmdBattery = 0;
     bool hmdPlugged = false;
@@ -308,6 +348,13 @@ inline uint64_t getTimestampUs() {
     return Current;
 }
 
+inline uint64_t getTimestampNs() {
+    timespec ts;
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+
+    return (uint64_t) ts.tv_sec * 1e9 + ts.tv_nsec;
+}
+
 ovrJava getOvrJava(bool initThread = false) {
     JNIEnv *env;
     if (initThread) {
@@ -347,152 +394,127 @@ void updateScalar(uint64_t path, float value) {
 }
 
 void updateButtons() {
-    ovrInputCapabilityHeader capabilitiesHeader;
-    uint32_t deviceIndex = 0;
-    while (vrapi_EnumerateInputDevices(CTX.ovrContext, deviceIndex, &capabilitiesHeader) >= 0) {
-        if (capabilitiesHeader.Type == ovrControllerType_TrackedRemote) {
-            ovrInputTrackedRemoteCapabilities capabilities = {};
-            capabilities.Header = capabilitiesHeader;
-            if (vrapi_GetInputDeviceCapabilities(CTX.ovrContext, &capabilities.Header) !=
-                ovrSuccess) {
-                continue;
-            }
+    if(!qiyu_IsControllerInit()) {
+        return;
+    }
 
-            ovrInputStateTrackedRemote inputState = {};
-            inputState.Header.ControllerType = capabilities.Header.Type;
-            if (vrapi_GetCurrentInputState(CTX.ovrContext,
-                                           capabilities.Header.DeviceID,
-                                           &inputState.Header) != ovrSuccess) {
-                continue;
-            }
+    qiyu_ControllerData left;
+	qiyu_ControllerData right;
 
-            if (capabilities.ControllerCapabilities & ovrControllerCaps_LeftHand) {
-                updateBinary(MENU_CLICK_ID, inputState.Buttons & ovrButton_Enter);
-                updateBinary(X_CLICK_ID, inputState.Buttons & ovrButton_X);
-                updateBinary(X_TOUCH_ID, inputState.Touches & ovrTouch_X);
-                updateBinary(Y_CLICK_ID, inputState.Buttons & ovrButton_Y);
-                updateBinary(Y_TOUCH_ID, inputState.Touches & ovrTouch_Y);
-                updateBinary(LEFT_SQUEEZE_CLICK_ID, inputState.Buttons & ovrButton_GripTrigger);
-                updateScalar(LEFT_SQUEEZE_VALUE_ID, inputState.GripTrigger);
-                updateBinary(LEFT_TRIGGER_CLICK_ID, inputState.Buttons & ovrButton_Trigger);
-                updateScalar(LEFT_TRIGGER_VALUE_ID, inputState.IndexTrigger);
-                updateBinary(LEFT_TRIGGER_TOUCH_ID, inputState.Touches & ovrTouch_IndexTrigger);
-                updateScalar(LEFT_THUMBSTICK_X_ID, inputState.Joystick.x);
-                updateScalar(LEFT_THUMBSTICK_Y_ID, inputState.Joystick.y);
-                updateBinary(LEFT_THUMBSTICK_CLICK_ID, inputState.Buttons & ovrButton_Joystick);
-                updateBinary(LEFT_THUMBSTICK_TOUCH_ID, inputState.Touches & ovrTouch_LThumb);
-                updateBinary(LEFT_THUMBREST_TOUCH_ID, inputState.Touches & ovrTouch_ThumbRest);
-            } else {
-                updateBinary(A_CLICK_ID, inputState.Buttons & ovrButton_A);
-                updateBinary(A_TOUCH_ID, inputState.Touches & ovrTouch_A);
-                updateBinary(B_CLICK_ID, inputState.Buttons & ovrButton_B);
-                updateBinary(B_TOUCH_ID, inputState.Touches & ovrTouch_B);
-                updateBinary(RIGHT_SQUEEZE_CLICK_ID, inputState.Buttons & ovrButton_GripTrigger);
-                updateScalar(RIGHT_SQUEEZE_VALUE_ID, inputState.GripTrigger);
-                updateBinary(RIGHT_TRIGGER_CLICK_ID, inputState.Buttons & ovrButton_Trigger);
-                updateScalar(RIGHT_TRIGGER_VALUE_ID, inputState.IndexTrigger);
-                updateBinary(RIGHT_TRIGGER_TOUCH_ID, inputState.Touches & ovrTouch_IndexTrigger);
-                updateScalar(RIGHT_THUMBSTICK_X_ID, inputState.Joystick.x);
-                updateScalar(RIGHT_THUMBSTICK_Y_ID, inputState.Joystick.y);
-                updateBinary(RIGHT_THUMBSTICK_CLICK_ID, inputState.Buttons & ovrButton_Joystick);
-                updateBinary(RIGHT_THUMBSTICK_TOUCH_ID, inputState.Touches & ovrTouch_RThumb);
-                updateBinary(RIGHT_THUMBREST_TOUCH_ID, inputState.Touches & ovrTouch_ThumbRest);
-            }
-        }
+    qiyu_GetControllerData(&left, &right);
 
-        deviceIndex++;
+    if (left.isConnect) {
+        updateBinary(MENU_CLICK_ID, left.button & BT_Home_Menu);
+        updateBinary(X_CLICK_ID, left.button & BT_A_X);
+        updateBinary(X_TOUCH_ID, left.buttonTouch & BT_A_X);
+        updateBinary(Y_CLICK_ID, left.button & BT_B_Y);
+        updateBinary(Y_TOUCH_ID, left.buttonTouch & BT_B_Y);
+        updateBinary(LEFT_SQUEEZE_CLICK_ID, left.button & BT_Grip);
+        updateScalar(LEFT_SQUEEZE_VALUE_ID, left.gripForce);
+        updateBinary(LEFT_TRIGGER_CLICK_ID, left.button & BT_Trigger);
+        updateScalar(LEFT_TRIGGER_VALUE_ID, left.triggerForce);
+        updateBinary(LEFT_TRIGGER_TOUCH_ID, left.buttonTouch & BT_Trigger);
+        updateScalar(LEFT_THUMBSTICK_X_ID, left.joyStickPos.x);
+        updateScalar(LEFT_THUMBSTICK_Y_ID, left.joyStickPos.y);
+        updateBinary(LEFT_THUMBSTICK_CLICK_ID, left.button & BT_JoyStick);
+        updateBinary(LEFT_THUMBSTICK_TOUCH_ID, left.buttonTouch & BT_JoyStick);
+        updateBinary(LEFT_THUMBREST_TOUCH_ID, left.buttonTouch & BT_None);
+    }
+
+    if (right.isConnect) {
+        updateBinary(A_CLICK_ID, right.button & BT_A_X);
+        updateBinary(A_TOUCH_ID, right.buttonTouch & BT_A_X);
+        updateBinary(B_CLICK_ID, right.button & BT_B_Y);
+        updateBinary(B_TOUCH_ID, right.buttonTouch & BT_B_Y);
+        updateBinary(RIGHT_SQUEEZE_CLICK_ID, right.button & BT_Grip);
+        updateScalar(RIGHT_SQUEEZE_VALUE_ID, right.gripForce);
+        updateBinary(RIGHT_TRIGGER_CLICK_ID, right.button & BT_Trigger);
+        updateScalar(RIGHT_TRIGGER_VALUE_ID, right.triggerForce);
+        updateBinary(RIGHT_TRIGGER_TOUCH_ID, right.buttonTouch & BT_Trigger);
+        updateScalar(RIGHT_THUMBSTICK_X_ID, right.joyStickPos.x);
+        updateScalar(RIGHT_THUMBSTICK_Y_ID, right.joyStickPos.y);
+        updateBinary(RIGHT_THUMBSTICK_CLICK_ID, right.button & BT_JoyStick);
+        updateBinary(RIGHT_THUMBSTICK_TOUCH_ID, right.buttonTouch & BT_JoyStick);
+        updateBinary(RIGHT_THUMBREST_TOUCH_ID, right.buttonTouch & BT_None);
     }
 }
 
 // return fov in OpenXR convention
-EyeFov getFov(ovrTracking2 tracking, int eye) {
+EyeFov getFov(qiyu_DeviceInfo* di, int eye) {
     // ovrTracking2 tracking = vrapi_GetPredictedTracking2(CTX.ovrContext, 0.0);
 
-    EyeFov fov;
-    auto projection = tracking.Eye[eye].ProjectionMatrix;
-    double a = projection.M[0][0];
-    double b = projection.M[1][1];
-    double c = projection.M[0][2];
-    double d = projection.M[1][2];
+    qiyu_ViewFrustum* pFrust;
 
-    fov.left = (float) atan((c - 1) / a);
-    fov.right = (float) atan((c + 1) / a);
-    fov.top = -(float) atan((d - 1) / b);
-    fov.bottom = -(float) atan((d + 1) / b);
+    if (eye == 0) {
+        pFrust = &di->frustumLeftEye;
+    } else {
+        pFrust = &di->frustumRightEye;
+    }
+
+    EyeFov fov;
+
+    fov.left = (float) atan(pFrust->left / pFrust->near);
+    fov.right = (float) atan(pFrust->right / pFrust->near);
+    fov.top = (float) atan(pFrust->top / pFrust->near);
+    fov.bottom = (float) atan(pFrust->bottom / pFrust->near);
 
     return fov;
 }
 
+static inline float getInterpupillaryDistance(qiyu_DeviceInfo* di) {
+    qiyu_Vector3 delta;
+    delta.x = di->frustumRightEye.position.x - di->frustumLeftEye.position.x;
+    delta.y = di->frustumRightEye.position.y - di->frustumLeftEye.position.y;
+    delta.z = di->frustumRightEye.position.z - di->frustumLeftEye.position.z;
+    return sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+}
+
 void getPlayspaceArea(float *width, float *height) {
-    ovrPosef spacePose;
-    ovrVector3f bboxScale;
+    qiyu_Vector3 bboxScale;
     // Theoretically pose (the 2nd parameter) could be nullptr, since we already have that, but
     // then this function gives us 0-size bounding box, so it has to be provided.
-    vrapi_GetBoundaryOrientedBoundingBox(CTX.ovrContext, &spacePose, &bboxScale);
+    bboxScale = qiyu_GetBoundaryDimensions();
     *width = 2.0f * bboxScale.x;
     *height = 2.0f * bboxScale.z;
 }
 
 uint8_t getControllerBattery(int index) {
-    ovrInputCapabilityHeader curCaps;
-    auto result = vrapi_EnumerateInputDevices(CTX.ovrContext, index, &curCaps);
-    if (result < 0 || curCaps.Type != ovrControllerType_TrackedRemote) {
+    if(!qiyu_IsControllerInit()) {
         return 0;
     }
 
-    ovrInputTrackedRemoteCapabilities remoteCapabilities;
-    remoteCapabilities.Header = curCaps;
-    result = vrapi_GetInputDeviceCapabilities(CTX.ovrContext, &remoteCapabilities.Header);
-    if (result != ovrSuccess) {
-        return 0;
-    }
+    qiyu_ControllerData left;
+	qiyu_ControllerData right;
 
-    ovrInputStateTrackedRemote remoteInputState;
-    remoteInputState.Header.ControllerType = remoteCapabilities.Header.Type;
-    result = vrapi_GetCurrentInputState(
-            CTX.ovrContext, remoteCapabilities.Header.DeviceID, &remoteInputState.Header);
-    if (result != ovrSuccess) {
-        return 0;
-    }
+    qiyu_GetControllerData(&left, &right);
 
-    return remoteInputState.BatteryPercentRemaining;
+    if (index == 0) {
+        return (uint8_t) left.batteryLevel;
+    } else {
+        return (uint8_t) right.batteryLevel;
+    }
 }
 
-void finishHapticsBuffer(ovrDeviceID DeviceID) {
-    uint8_t hapticBuffer[1] = {0};
-    ovrHapticBuffer buffer;
-    buffer.BufferTime = vrapi_GetPredictedDisplayTime(CTX.ovrContext, CTX.ovrFrameIndex);
-    buffer.HapticBuffer = &hapticBuffer[0];
-    buffer.NumSamples = 1;
-    buffer.Terminated = true;
-
-    auto result = vrapi_SetHapticVibrationBuffer(CTX.ovrContext, DeviceID, &buffer);
-    if (result != ovrSuccess) {
-        info("vrapi_SetHapticVibrationBuffer: Failed. result=%d", result);
-    }
-}
+auto& finishHapticsBuffer = qiyu_StopControllerVibration;
 
 void updateHapticsState() {
-    ovrInputCapabilityHeader curCaps;
-    ovrResult result;
+    qiyu_ControllerMask curCaps;
+
+    if(!qiyu_IsControllerInit()) {
+        return;
+    }
 
     for (uint32_t deviceIndex = 0;
-         vrapi_EnumerateInputDevices(CTX.ovrContext, deviceIndex, &curCaps) >= 0;
+         deviceIndex < CI_COUNT;
          deviceIndex++) {
 
-        if (curCaps.Type != ovrControllerType_TrackedRemote)
-            continue;
+        // if (!ctrlState.qyCtrlData[deviceIndex].isConnect)
+        //     continue;
 
-        ovrInputTrackedRemoteCapabilities remoteCapabilities;
-
-        remoteCapabilities.Header = curCaps;
-        result = vrapi_GetInputDeviceCapabilities(CTX.ovrContext, &remoteCapabilities.Header);
-        if (result != ovrSuccess) {
-            continue;
-        }
+        curCaps = deviceIndex ? qiyu_ControllerMask::CM_Right : qiyu_ControllerMask::CM_Left;
 
         int curHandIndex =
-                (remoteCapabilities.ControllerCapabilities & ovrControllerCaps_LeftHand) ? 1 : 0;
+                deviceIndex ? 0 : 1;
         auto &s = CTX.hapticsState[curHandIndex];
 
         uint64_t currentUs = getTimestampUs();
@@ -506,7 +528,7 @@ void updateHapticsState() {
         if (s.startUs <= 0) {
             // No requested haptics for this hand.
             if (s.buffered) {
-                finishHapticsBuffer(curCaps.DeviceID);
+                finishHapticsBuffer(curCaps);
                 s.buffered = false;
             }
             continue;
@@ -516,47 +538,15 @@ void updateHapticsState() {
             // No more haptics is needed.
             s.startUs = 0;
             if (s.buffered) {
-                finishHapticsBuffer(curCaps.DeviceID);
+                finishHapticsBuffer(curCaps);
                 s.buffered = false;
             }
             continue;
         }
 
-        if (remoteCapabilities.ControllerCapabilities &
-            ovrControllerCaps_HasBufferedHapticVibration) {
-            // Note: HapticSamplesMax=25 HapticSampleDurationMS=2 on Quest
-
-            // First, call with buffer.Terminated = false and when haptics is no more needed call
-            // with buffer.Terminated = true (to stop haptics?).
-
-            auto requiredHapticsBuffer = static_cast<uint32_t>(
-                    (s.endUs - currentUs) / (remoteCapabilities.HapticSampleDurationMS * 1000));
-
-            std::vector<uint8_t> hapticBuffer(remoteCapabilities.HapticSamplesMax);
-            ovrHapticBuffer buffer;
-            buffer.BufferTime =
-                    vrapi_GetPredictedDisplayTime(CTX.ovrContext, CTX.ovrFrameIndex);
-            buffer.HapticBuffer = &hapticBuffer[0];
-            buffer.NumSamples =
-                    std::min(remoteCapabilities.HapticSamplesMax, requiredHapticsBuffer);
-            buffer.Terminated = false;
-
-            for (uint32_t i = 0; i < buffer.NumSamples; i++) {
-                if (s.amplitude > 1.0f)
-                    hapticBuffer[i] = 255;
-                else
-                    hapticBuffer[i] = static_cast<uint8_t>(255 * s.amplitude);
-            }
-
-            result = vrapi_SetHapticVibrationBuffer(CTX.ovrContext, curCaps.DeviceID, &buffer);
-            if (result != ovrSuccess) {
-                info("vrapi_SetHapticVibrationBuffer: Failed. result=%d", result);
-            }
-            s.buffered = true;
-        } else if (remoteCapabilities.ControllerCapabilities &
-                   ovrControllerCaps_HasSimpleHapticVibration) {
-            vrapi_SetHapticVibrationSimple(CTX.ovrContext, curCaps.DeviceID, s.amplitude);
-        }
+        qiyu_StartControllerVibration(
+            curCaps, s.amplitude, (float) (s.endUs - currentUs) / 1e6);
+        s.buffered = true;
     }
 }
 
@@ -582,12 +572,17 @@ void eventsThread() {
 
             AlvrDeviceMotion headMotion = {};
             uint64_t targetTimestampNs =
-                    vrapi_GetTimeInSeconds() * 1e9 + alvr_get_prediction_offset_ns();
+                    getTimestampNs(); // + alvr_get_prediction_offset_ns() will make the controller unstable
             auto headTracking =
-                    vrapi_GetPredictedTracking2(CTX.ovrContext, (double) targetTimestampNs / 1e9);
+                    qiyu_PredictHeadPose((float) alvr_get_prediction_offset_ns() / 1e6);
             headMotion.device_id = HEAD_ID;
-            memcpy(&headMotion.orientation, &headTracking.HeadPose.Pose.Orientation, 4 * 4);
-            memcpy(headMotion.position, &headTracking.HeadPose.Pose.Position, 4 * 3);
+            headMotion.orientation.x = headTracking.pose.rotation.x;
+            headMotion.orientation.y = headTracking.pose.rotation.y;
+            headMotion.orientation.z = headTracking.pose.rotation.z;
+            headMotion.orientation.w = -headTracking.pose.rotation.w;
+            headMotion.position[0] = -headTracking.pose.position.x;
+            headMotion.position[1] = -headTracking.pose.position.y - g_fTrackingOffset;
+            headMotion.position[2] = -headTracking.pose.position.z;
             // Note: do not copy velocities. Avoid reprojection in SteamVR
             motionVec.push_back(headMotion);
 
@@ -602,85 +597,35 @@ void eventsThread() {
 
             updateButtons();
 
-            double controllerDisplayTimeS =
-                    vrapi_GetTimeInSeconds() + (double) alvr_get_prediction_offset_ns() / 1e9 *
-                                               CTX.streamingConfig.controller_prediction_multiplier;
+            if(qiyu_IsControllerInit()) {
+                qiyu_ControllerData left;
+                qiyu_ControllerData right;
 
-            ovrInputCapabilityHeader capabilitiesHeader;
-            uint32_t deviceIndex = 0;
-            while (vrapi_EnumerateInputDevices(CTX.ovrContext, deviceIndex, &capabilitiesHeader) >=
-                   0) {
-                if (capabilitiesHeader.Type == ovrControllerType_TrackedRemote) {
-                    ovrInputTrackedRemoteCapabilities capabilities = {};
-                    capabilities.Header = capabilitiesHeader;
-                    if (vrapi_GetInputDeviceCapabilities(CTX.ovrContext, &capabilities.Header) !=
-                        ovrSuccess) {
-                        continue;
-                    }
+                qiyu_GetControllerData(&left, &right);
 
-                    uint64_t handID;
-                    if (capabilities.ControllerCapabilities & ovrControllerCaps_LeftHand) {
-                        handID = LEFT_HAND_ID;
-                    } else {
-                        handID = RIGHT_HAND_ID;
-                    }
+                if (left.isConnect) {
+                    AlvrDeviceMotion motion = {};
+                    motion.device_id = LEFT_HAND_ID;
+                    memcpy(&motion.orientation, &left.rotation, 4 * 4);
+                    memcpy(motion.position, &left.position, 4 * 3);
+                    memcpy(motion.linear_velocity, &left.velocity, 4 * 3);
+                    memcpy(motion.angular_velocity, &left.angVelocity, 4 * 3);
+                    motion.position[1] -= g_fTrackingOffset;
 
-                    ovrTracking tracking = {};
-                    if (vrapi_GetInputTrackingState(CTX.ovrContext,
-                                                    capabilities.Header.DeviceID,
-                                                    controllerDisplayTimeS,
-                                                    &tracking) == ovrSuccess) {
-                        if(((tracking.Status & VRAPI_TRACKING_STATUS_POSITION_VALID) && (tracking.Status & VRAPI_TRACKING_STATUS_ORIENTATION_VALID)) ||
-                            (capabilities.ControllerCapabilities & ovrControllerCaps_ModelOculusGo)) {
-                            AlvrDeviceMotion motion = {};
-                            motion.device_id = handID;
-                            memcpy(&motion.orientation, &tracking.HeadPose.Pose.Orientation, 4 * 4);
-                            memcpy(motion.position, &tracking.HeadPose.Pose.Position, 4 * 3);
-                            memcpy(motion.linear_velocity, &tracking.HeadPose.LinearVelocity, 4 * 3);
-                            memcpy(motion.angular_velocity, &tracking.HeadPose.AngularVelocity, 4 * 3);
-
-                            motionVec.push_back(motion);
-                        }
-                    }
-                } else if (capabilitiesHeader.Type == ovrControllerType_Hand) {
-                    ovrInputHandCapabilities capabilities;
-                    capabilities.Header = capabilitiesHeader;
-                    if (vrapi_GetInputDeviceCapabilities(CTX.ovrContext, &capabilities.Header) !=
-                        ovrSuccess) {
-                        continue;
-                    }
-
-                    uint64_t handID;
-                    OculusHand *handRef = nullptr;
-                    if (capabilities.HandCapabilities & ovrHandCaps_LeftHand) {
-                        handID = LEFT_HAND_ID;
-                        handRef = &leftHand;
-                    } else {
-                        handID = RIGHT_HAND_ID;
-                        handRef = &rightHand;
-                    }
-
-                    ovrHandPose handPose;
-                    handPose.Header.Version = ovrHandVersion_1;
-                    if (vrapi_GetHandPose(CTX.ovrContext,
-                                          capabilities.Header.DeviceID,
-                                          controllerDisplayTimeS,
-                                          &handPose.Header) == ovrSuccess &&
-                        (handPose.Status & ovrHandTrackingStatus_Tracked)) {
-                        AlvrDeviceMotion motion = {};
-                        motion.device_id = handID;
-                        memcpy(&motion.orientation, &handPose.RootPose.Orientation, 4 * 4);
-                        memcpy(motion.position, &handPose.RootPose.Position, 4 * 3);
-                        // Note: ovrHandPose does not have velocities
-                        for (int i = 0; i < ovrHandBone_MaxSkinnable; i++) {
-                            memcpy(&handRef->bone_rotations[i], &handPose.BoneRotations[i], 4 * 4);
-                        }
-                        motionVec.push_back(motion);
-                        handRef->enabled = true;
-                    }
+                    motionVec.push_back(motion);
                 }
 
-                deviceIndex++;
+                if (right.isConnect) {
+                    AlvrDeviceMotion motion = {};
+                    motion.device_id = RIGHT_HAND_ID;
+                    memcpy(&motion.orientation, &right.rotation, 4 * 4);
+                    memcpy(motion.position, &right.position, 4 * 3);
+                    memcpy(motion.linear_velocity, &right.velocity, 4 * 3);
+                    memcpy(motion.angular_velocity, &right.angVelocity, 4 * 3);
+                    motion.position[1] -= g_fTrackingOffset;
+
+                    motionVec.push_back(motion);
+                }
             }
 
             alvr_send_tracking(targetTimestampNs, &motionVec[0], motionVec.size(), leftHand,
@@ -690,22 +635,22 @@ void eventsThread() {
 
 
         // there is no useful event in the oculus API, ignore
-        ovrEventHeader _eventHeader;
-        auto _res = vrapi_PollEvent(&_eventHeader);
+        // ovrEventHeader _eventHeader;
+        // auto _res = vrapi_PollEvent(&_eventHeader);
 
-        int newRecenterCount = vrapi_GetSystemStatusInt(&java, VRAPI_SYS_STATUS_RECENTER_COUNT);
-        if (recenterCount != newRecenterCount) {
-            float width, height;
-            getPlayspaceArea(&width, &height);
-            alvr_send_playspace(width, height);
+        // int newRecenterCount = vrapi_GetSystemStatusInt(&java, VRAPI_SYS_STATUS_RECENTER_COUNT);
+        // if (recenterCount != newRecenterCount) {
+        //     float width, height;
+        //     getPlayspaceArea(&width, &height);
+        //     alvr_send_playspace(width, height);
 
-            recenterCount = newRecenterCount;
-        }
+        //     recenterCount = newRecenterCount;
+        // }
 
-        ovrTracking2 tracking = vrapi_GetPredictedTracking2(CTX.ovrContext, 0.0);
-        auto newLeftFov = getFov(tracking, 0);
-        auto newRightFov = getFov(tracking, 1);
-        float newIpd = vrapi_GetInterpupillaryDistance(&tracking);
+        qiyu_DeviceInfo di = qiyu_GetDeviceInfo();
+        auto newLeftFov = getFov(&di, 0);
+        auto newRightFov = getFov(&di, 1);
+        float newIpd = getInterpupillaryDistance(&di);
 
         if (abs(newIpd - CTX.lastIpd) > IPD_EPS ||
             abs(newLeftFov.left - CTX.lastFov.left) > IPD_EPS) {
@@ -734,7 +679,7 @@ void eventsThread() {
                 auto &s = CTX.hapticsState[curHandIndex];
                 s.startUs = 0;
                 s.endUs = (uint64_t) (haptics.duration_s * 1000'000);
-                s.amplitude = haptics.amplitude;
+                s.amplitude = (haptics.amplitude > 0.2) ? haptics.amplitude : 0.2;
                 s.frequency = haptics.frequency;
                 s.fresh = true;
                 s.buffered = false;
@@ -753,6 +698,23 @@ void eventsThread() {
     }
 }
 
+static void CreateLayout_(float centerX, float centerY, float radiusX, float radiusY, qiyu_RenderLayer_ScreenPosUV* pLayout)//FIXME! //TODO!
+{
+	// This is always in screen space so we want Z = 0 and W = 1
+	float lowerLeftPos[4] = { centerX - radiusX, centerY - radiusY, 0.0f, 1.0f };
+	float lowerRightPos[4] = { centerX + radiusX, centerY - radiusY, 0.0f, 1.0f };
+	float upperLeftPos[4] = { centerX - radiusX, centerY + radiusY, 0.0f, 1.0f };
+	float upperRightPos[4] = { centerX + radiusX, centerY + radiusY, 0.0f, 1.0f };
+	float lowerUVs[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
+	float upperUVs[4] = { 0.0f, 1.0f, 1.0f, 1.0f };
+	memcpy(pLayout->LowerLeftPos, lowerLeftPos, sizeof(lowerLeftPos));
+	memcpy(pLayout->LowerRightPos, lowerRightPos, sizeof(lowerRightPos));
+	memcpy(pLayout->UpperLeftPos, upperLeftPos, sizeof(upperLeftPos));
+	memcpy(pLayout->UpperRightPos, upperRightPos, sizeof(upperRightPos));
+	memcpy(pLayout->LowerUVs, lowerUVs, sizeof(lowerUVs));
+	memcpy(pLayout->UpperUVs, upperUVs, sizeof(upperUVs));
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_alvr_client_VRActivity_initializeNative(JNIEnv *env, jobject context) {
     env->GetJavaVM(&CTX.vm);
@@ -763,21 +725,23 @@ Java_alvr_client_VRActivity_initializeNative(JNIEnv *env, jobject context) {
     eglInit();
 
     memset(CTX.hapticsState, 0, sizeof(CTX.hapticsState));
-    const ovrInitParms initParms = vrapi_DefaultInitParms(&java);
-    vrapi_Initialize(&initParms);
+    qiyu_Init(java.ActivityObject,
+			  java.Vm,
+			  qiyu_GraphicsApi::GA_OpenGLES,
+			  qiyu_TrackingOriginMode::TM_Ground,
+			  false);
 
+    qiyu_DeviceInfo deviceInfo = qiyu_GetDeviceInfo();
     CTX.recommendedViewWidth =
-            vrapi_GetSystemPropertyInt(&java, VRAPI_SYS_PROP_DISPLAY_PIXELS_WIDE) / 2;
+            deviceInfo.iEyeTargetWidth;
     CTX.recommendedViewHeight =
-            vrapi_GetSystemPropertyInt(&java, VRAPI_SYS_PROP_DISPLAY_PIXELS_HIGH);
+            deviceInfo.iEyeTargetHeight;
 
-    auto refreshRatesCount =
-            vrapi_GetSystemPropertyInt(&java, VRAPI_SYS_PROP_NUM_SUPPORTED_DISPLAY_REFRESH_RATES);
+    int refreshRatesCount =
+            2;
     auto refreshRatesBuffer = std::vector<float>(refreshRatesCount);
-    vrapi_GetSystemPropertyFloatArray(&java,
-                                      VRAPI_SYS_PROP_SUPPORTED_DISPLAY_REFRESH_RATES,
-                                      &refreshRatesBuffer[0],
-                                      refreshRatesCount);
+    refreshRatesBuffer[0] = 72.f;
+    refreshRatesBuffer[1] = 90.f;
 
     alvr_initialize((void *) CTX.vm,
                     (void *) CTX.context,
@@ -791,7 +755,7 @@ Java_alvr_client_VRActivity_initializeNative(JNIEnv *env, jobject context) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_alvr_client_VRActivity_destroyNative(JNIEnv *_env, jobject _context) {
-    vrapi_Shutdown();
+    qiyu_Release();
 
     alvr_destroy();
     alvr_destroy_opengl();
@@ -810,48 +774,44 @@ extern "C" JNIEXPORT void JNICALL Java_alvr_client_VRActivity_onResumeNative(
 
     info("Entering VR mode.");
 
-    ovrModeParms parms = vrapi_DefaultModeParms(&java);
-
-    parms.Flags |= VRAPI_MODE_FLAG_RESET_WINDOW_FULLSCREEN;
-
-    parms.Flags |= VRAPI_MODE_FLAG_NATIVE_WINDOW;
-    parms.Display = (size_t) CTX.egl.Display;
-    parms.WindowSurface = (size_t) CTX.window;
-    parms.ShareContext = (size_t) CTX.egl.Context;
-
-    CTX.ovrContext = vrapi_EnterVrMode(&parms);
-
-    if (CTX.ovrContext == nullptr) {
+    if (!qiyu_StartVR(CTX.window, PL_System, PL_System)) {
         error("Invalid ANativeWindow");
     }
 
     // set Color Space
-    ovrHmdColorDesc colorDesc{};
-    colorDesc.ColorSpace = VRAPI_COLORSPACE_RIFT_S;
-    vrapi_SetClientColorDesc(CTX.ovrContext, &colorDesc);
+    // ovrHmdColorDesc colorDesc{};
+    // colorDesc.ColorSpace = VRAPI_COLORSPACE_RIFT_S;
+    // vrapi_SetClientColorDesc(CTX.ovrContext, &colorDesc);
 
-    vrapi_SetPerfThread(CTX.ovrContext, VRAPI_PERF_THREAD_TYPE_MAIN, gettid());
+    // vrapi_SetPerfThread(CTX.ovrContext, VRAPI_PERF_THREAD_TYPE_MAIN, gettid());
 
-    vrapi_SetTrackingSpace(CTX.ovrContext, VRAPI_TRACKING_SPACE_STAGE);
+    qiyu_SetTrackingOriginMode(qiyu_TrackingOriginMode::TM_Ground);
 
     std::vector<int32_t> textureHandlesBuffer[2];
     for (int eye = 0; eye < 2; eye++) {
-        CTX.lobbySwapchains[eye].inner =
-                vrapi_CreateTextureSwapChain3(VRAPI_TEXTURE_TYPE_2D,
-                                              SWAPCHAIN_FORMAT,
-                                              CTX.recommendedViewWidth,
-                                              CTX.recommendedViewHeight,
-                                              1,
-                                              3);
-        int size = vrapi_GetTextureSwapChainLength(CTX.lobbySwapchains[eye].inner);
+        GL(glGenTextures(1, &CTX.lobbyTextures[eye]));
+        GL(glBindTexture(GL_TEXTURE_2D, CTX.lobbyTextures[eye]));
+        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+        GL(glTexImage2D(GL_TEXTURE_2D,
+                        0,
+                        GL_RGB,
+                        CTX.recommendedViewWidth,
+                        CTX.recommendedViewHeight,
+                        0,
+                        GL_RGB,
+                        GL_UNSIGNED_BYTE,
+                        nullptr));
+        int size = 1;
 
         for (int index = 0; index < size; index++) {
-            auto handle =
-                    vrapi_GetTextureSwapChainHandle(CTX.lobbySwapchains[eye].inner, index);
+            auto handle = CTX.lobbyTextures[eye];
             textureHandlesBuffer[eye].push_back(handle);
         }
-
-        CTX.lobbySwapchains[eye].index = 0;
+ 
+        // CTX.lobbySwapchains[eye].index = 0;
     }
     const int32_t *textureHandles[2] = {&textureHandlesBuffer[0][0], &textureHandlesBuffer[1][0]};
 
@@ -859,10 +819,10 @@ extern "C" JNIEXPORT void JNICALL Java_alvr_client_VRActivity_onResumeNative(
     CTX.eventsThread = std::thread(eventsThread);
 
     alvr_resume_opengl(CTX.recommendedViewWidth, CTX.recommendedViewHeight, textureHandles,
-                       textureHandlesBuffer[0].size());
+                       1);
     alvr_resume();
 
-    vrapi_SetDisplayRefreshRate(CTX.ovrContext, CTX.refreshRate);
+    // vrapi_SetDisplayRefreshRate(CTX.ovrContext, CTX.refreshRate);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -873,21 +833,29 @@ Java_alvr_client_VRActivity_onStreamStartNative(JNIEnv *_env, jobject _context) 
 
     std::vector<int32_t> textureHandlesBuffer[2];
     for (int eye = 0; eye < 2; eye++) {
-        CTX.streamSwapchains[eye].inner =
-                vrapi_CreateTextureSwapChain3(VRAPI_TEXTURE_TYPE_2D,
-                                              SWAPCHAIN_FORMAT,
-                                              CTX.streamingConfig.view_width,
-                                              CTX.streamingConfig.view_height,
-                                              1,
-                                              3);
-        auto size = vrapi_GetTextureSwapChainLength(CTX.streamSwapchains[eye].inner);
+        GL(glGenTextures(1, &CTX.streamTextures[eye]));
+        GL(glBindTexture(GL_TEXTURE_2D, CTX.streamTextures[eye]));
+        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
+        GL(glTexImage2D(GL_TEXTURE_2D,
+                        0,
+                        GL_RGB,
+                        CTX.streamingConfig.view_width,
+                        CTX.streamingConfig.view_height,
+                        0,
+                        GL_RGB,
+                        GL_UNSIGNED_BYTE,
+                        nullptr));
+        int size = 1;
 
         for (int index = 0; index < size; index++) {
-            auto handle = vrapi_GetTextureSwapChainHandle(CTX.streamSwapchains[eye].inner, index);
+            auto handle = CTX.streamTextures[eye];
             textureHandlesBuffer[eye].push_back(handle);
         }
 
-        CTX.streamSwapchains[eye].index = 0;
+        // CTX.streamSwapchains[eye].index = 0;
     }
     const int32_t *textureHandles[2] = {&textureHandlesBuffer[0][0], &textureHandlesBuffer[1][0]};
 
@@ -900,22 +868,30 @@ Java_alvr_client_VRActivity_onStreamStartNative(JNIEnv *_env, jobject _context) 
     //    I/VrApi:
     //    FPS=71,Prd=76ms,Tear=0,Early=66,Stale=0,VSnc=1,Lat=1,Fov=0,CPU4/GPU=3/3,1958/515MHz,OC=FF,TA=0/E0/0,SP=N/N/N,Mem=1804MHz,Free=906MB,PSM=0,PLS=0,Temp=38.0C/0.0C,TW=1.93ms,App=1.46ms,GD=0.00ms
     // We need to set ExtraLatencyMode On to workaround for this issue.
-    vrapi_SetExtraLatencyMode(CTX.ovrContext,
-                              (ovrExtraLatencyMode) CTX.streamingConfig.extra_latency);
+    // vrapi_SetExtraLatencyMode(CTX.ovrContext,
+    //                           (ovrExtraLatencyMode) CTX.streamingConfig.extra_latency);
 
-    ovrResult result = vrapi_SetDisplayRefreshRate(CTX.ovrContext, CTX.refreshRate);
-    if (result != ovrSuccess) {
-        error("Failed to set refresh rate requested by the server: %d", result);
+    // ovrResult result = vrapi_SetDisplayRefreshRate(CTX.ovrContext, CTX.refreshRate);
+    // if (result != ovrSuccess) {
+    //     error("Failed to set refresh rate requested by the server: %d", result);
+    // }
+
+    if (CTX.streamingConfig.oculus_foveation_level == FL_Custom) {
+        qiyu_FoveationParam customFoveationParam;
+		customFoveationParam.gainRate.x = 8.0f;
+		customFoveationParam.gainRate.y = 8.0f;
+		customFoveationParam.areaSize = 1.0f;
+		customFoveationParam.minResolution = 0.0625f;
+		qiyu_SetFoveation(FL_Custom, &customFoveationParam);
+    } else {
+        qiyu_SetFoveation(static_cast<qiyu_FoveationLevel>(CTX.streamingConfig.oculus_foveation_level));
     }
+    // vrapi_SetPropertyInt(
+    //         &java, VRAPI_DYNAMIC_FOVEATION_ENABLED, CTX.streamingConfig.dynamic_oculus_foveation);
 
-    vrapi_SetPropertyInt(
-            &java, VRAPI_FOVEATION_LEVEL, CTX.streamingConfig.oculus_foveation_level);
-    vrapi_SetPropertyInt(
-            &java, VRAPI_DYNAMIC_FOVEATION_ENABLED, CTX.streamingConfig.dynamic_oculus_foveation);
-
-    ovrTracking2 tracking = vrapi_GetPredictedTracking2(CTX.ovrContext, 0.0);
-    EyeFov fovArr[2] = {getFov(tracking, 0), getFov(tracking, 1)};
-    float ipd = vrapi_GetInterpupillaryDistance(&tracking);
+    qiyu_DeviceInfo di = qiyu_GetDeviceInfo();
+    EyeFov fovArr[2] = {getFov(&di, 0), getFov(&di, 1)};
+    float ipd = getInterpupillaryDistance(&di);
     alvr_send_views_config(fovArr, ipd);
 
     alvr_send_battery(HEAD_ID, CTX.hmdBattery, CTX.hmdPlugged);
@@ -926,7 +902,8 @@ Java_alvr_client_VRActivity_onStreamStartNative(JNIEnv *_env, jobject _context) 
     getPlayspaceArea(&areaWidth, &areaHeight);
     alvr_send_playspace(areaWidth, areaHeight);
 
-    alvr_start_stream_opengl(textureHandles, textureHandlesBuffer[0].size());
+    // alvr_start_stream_opengl(textureHandles, textureHandlesBuffer[0].size());
+    alvr_start_stream_opengl(textureHandles, 1);
 
     CTX.streaming = true;
 }
@@ -935,12 +912,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_alvr_client_VRActivity_onStreamStopNative(JNIEnv *_env, jobject _context) {
     CTX.streaming = false;
 
-    if (CTX.streamSwapchains[0].inner != nullptr) {
-        vrapi_DestroyTextureSwapChain(CTX.streamSwapchains[0].inner);
-        vrapi_DestroyTextureSwapChain(CTX.streamSwapchains[1].inner);
-        CTX.streamSwapchains[0].inner = nullptr;
-        CTX.streamSwapchains[1].inner = nullptr;
-    }
+    GL(glDeleteTextures(2, CTX.streamTextures));
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -954,14 +926,9 @@ Java_alvr_client_VRActivity_onPauseNative(JNIEnv *_env, jobject _context) {
         CTX.running = false;
         CTX.eventsThread.join();
     }
-    if (CTX.lobbySwapchains[0].inner != nullptr) {
-        vrapi_DestroyTextureSwapChain(CTX.lobbySwapchains[0].inner);
-        vrapi_DestroyTextureSwapChain(CTX.lobbySwapchains[1].inner);
-        CTX.lobbySwapchains[0].inner = nullptr;
-        CTX.lobbySwapchains[1].inner = nullptr;
-    }
+    GL(glDeleteTextures(2, CTX.lobbyTextures));
 
-    vrapi_LeaveVrMode(CTX.ovrContext);
+    qiyu_EndVR();
 
     CTX.ovrContext = nullptr;
 
@@ -973,10 +940,10 @@ Java_alvr_client_VRActivity_onPauseNative(JNIEnv *_env, jobject _context) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_alvr_client_VRActivity_renderNative(JNIEnv *_env, jobject _context) {
-    ovrLayerProjection2 worldLayer = vrapi_DefaultLayerProjection2();
-
     double displayTime;
-    ovrTracking2 tracking;
+    qiyu_HeadPoseState tracking;
+    qiyu_FrameParam frameParam;
+    memset(&frameParam, 0, sizeof(frameParam));
 
     if (CTX.streaming) {
         void *streamHardwareBuffer = nullptr;
@@ -1001,65 +968,69 @@ Java_alvr_client_VRActivity_renderNative(JNIEnv *_env, jobject _context) {
             }
         }
 
-        int swapchainIndices[2] = {CTX.streamSwapchains[0].index,
-                                   CTX.streamSwapchains[1].index};
+        // int swapchainIndices[2] = {CTX.streamSwapchains[0].index,
+        //                            CTX.streamSwapchains[1].index};
+        int swapchainIndices[2] = {0, 0};
         alvr_render_stream_opengl(streamHardwareBuffer, swapchainIndices);
 
-        double vsyncQueueS = vrapi_GetPredictedDisplayTime(CTX.ovrContext, CTX.ovrFrameIndex) -
-                             vrapi_GetTimeInSeconds();
-        alvr_report_submit(timestampNs, vsyncQueueS * 1e9);
+        float vsyncQueueMs = qiyu_PredictDisplayTime();
+        alvr_report_submit(timestampNs, vsyncQueueMs * 1e6);
 
-        worldLayer.HeadPose = tracking.HeadPose;
         for (int eye = 0; eye < 2; eye++) {
-            worldLayer.Textures[eye].ColorSwapChain = CTX.streamSwapchains[eye].inner;
-            worldLayer.Textures[eye].SwapChainIndex = CTX.streamSwapchains[eye].index;
-            CTX.streamSwapchains[eye].index = (CTX.streamSwapchains[eye].index + 1) % 3;
+            frameParam.renderLayers[eye].imageHandle = CTX.streamTextures[eye];
+            frameParam.renderLayers[eye].imageType = TT_Texture;
+            CreateLayout_(0.0f, 0.0f, 1.0f, 1.0f, &frameParam.renderLayers[eye].imageCoords);//FIXME! //TODO!
+            frameParam.renderLayers[eye].eyeMask = eye ? RL_EyeMask_Right : RL_EyeMask_Left;
+            // CTX.streamSwapchains[eye].index = (CTX.streamSwapchains[eye].index + 1) % 3;
         }
     } else {
-        displayTime = vrapi_GetPredictedDisplayTime(CTX.ovrContext, CTX.ovrFrameIndex);
-        tracking = vrapi_GetPredictedTracking2(CTX.ovrContext, displayTime);
+        qiyu_DeviceInfo di = qiyu_GetDeviceInfo();
+        float fPredictedTimeMs = qiyu_PredictDisplayTime();
+	    tracking = qiyu_PredictHeadPose(fPredictedTimeMs);
+
+        qiyu_Quaternion leftEyeRot;// glm quat is (w)(xyz), BUT here is xyzw
+        leftEyeRot.x = di.frustumLeftEye.rotation.x;
+        leftEyeRot.y = di.frustumLeftEye.rotation.y;
+        leftEyeRot.z = di.frustumLeftEye.rotation.z;
+        leftEyeRot.w = di.frustumLeftEye.rotation.w;
+        qiyu_Quaternion rightEyeRot;// glm quat is (w)(xyz), BUT here is xyzw
+        rightEyeRot.x = di.frustumRightEye.rotation.x;
+        rightEyeRot.y = di.frustumRightEye.rotation.y;
+        rightEyeRot.z = di.frustumRightEye.rotation.z;
+        rightEyeRot.w = di.frustumRightEye.rotation.w;
+        qiyu_Matrix4 outEyeMatrix[2];
+        qiyu_GetViewMatrix(outEyeMatrix[0], outEyeMatrix[1], g_fTrackingOffset, tracking, leftEyeRot, rightEyeRot);
 
         AlvrEyeInput eyeInputs[2] = {};
         int swapchainIndices[2] = {};
         for (int eye = 0; eye < 2; eye++) {
-            auto q = tracking.HeadPose.Pose.Orientation;
-            auto v = ovrMatrix4f_Inverse(&tracking.Eye[eye].ViewMatrix);
+            auto q = tracking.pose.rotation;
+            auto v = ovrMatrix4f_Inverse((ovrMatrix4f*) &outEyeMatrix[eye]);
 
-            eyeInputs[eye].orientation = AlvrQuat{q.x, q.y, q.z, q.w};
-            eyeInputs[eye].position[0] = v.M[0][3];
-            eyeInputs[eye].position[1] = v.M[1][3];
-            eyeInputs[eye].position[2] = v.M[2][3];
-            eyeInputs[eye].fov = getFov(tracking, eye);
+            eyeInputs[eye].orientation = AlvrQuat{q.x, q.y, q.z, -q.w};
+            eyeInputs[eye].position[0] = -v.M[0][3];
+            eyeInputs[eye].position[1] = -v.M[1][3] - g_fTrackingOffset;
+            eyeInputs[eye].position[2] = -v.M[2][3];
+            eyeInputs[eye].fov = getFov(&di, eye);
 
-            swapchainIndices[eye] = CTX.lobbySwapchains[eye].index;
+            // swapchainIndices[eye] = CTX.lobbySwapchains[eye].index;
+            swapchainIndices[eye] = 0;
         }
         alvr_render_lobby_opengl(eyeInputs, swapchainIndices);
 
         for (int eye = 0; eye < 2; eye++) {
-            worldLayer.Textures[eye].ColorSwapChain = CTX.lobbySwapchains[eye].inner;
-            worldLayer.Textures[eye].SwapChainIndex = CTX.lobbySwapchains[eye].index;
-            CTX.lobbySwapchains[eye].index = (CTX.lobbySwapchains[eye].index + 1) % 3;
+            frameParam.renderLayers[eye].imageHandle = CTX.lobbyTextures[eye];
+            frameParam.renderLayers[eye].imageType = TT_Texture;
+            CreateLayout_(0.0f, 0.0f, 1.0f, 1.0f, &frameParam.renderLayers[eye].imageCoords);//FIXME! //TODO!
+            frameParam.renderLayers[eye].eyeMask = eye ? RL_EyeMask_Right : RL_EyeMask_Left;
+            // CTX.lobbySwapchains[eye].index = (CTX.lobbySwapchains[eye].index + 1) % 3;
         }
     }
 
-    for (int eye = 0; eye < 2; eye++) {
-        worldLayer.Textures[eye].TexCoordsFromTanAngles =
-                ovrMatrix4f_TanAngleMatrixFromProjection(&tracking.Eye[eye].ProjectionMatrix);
-    }
+    frameParam.minVsyncs = 1;
+    frameParam.headPoseState = tracking;
 
-    worldLayer.HeadPose = tracking.HeadPose;
-
-    const ovrLayerHeader2 *layers[] = {&worldLayer.Header};
-
-    ovrSubmitFrameDescription2 frameDesc = {};
-    frameDesc.Flags = 0;
-    frameDesc.SwapInterval = 1;
-    frameDesc.FrameIndex = CTX.ovrFrameIndex;
-    frameDesc.DisplayTime = displayTime;
-    frameDesc.LayerCount = 1;
-    frameDesc.Layers = layers;
-
-    vrapi_SubmitFrame2(CTX.ovrContext, &frameDesc);
+    qiyu_SubmitFrame(frameParam);
 
     CTX.ovrFrameIndex++;
 }
