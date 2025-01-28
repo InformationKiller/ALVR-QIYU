@@ -14,6 +14,8 @@
 #include <vector>
 #include <time.h>
 #include "QiyuApi.h"
+#include "Hand_Trajectory_Prediction.h"
+#include "Jerk_Estimation.h"
 
 void log(AlvrLogLevel level, const char *format, ...) {
     va_list args;
@@ -115,7 +117,10 @@ const float IPD_EPS = 0.001; // minimum change of IPD to be registered as a new 
 
 const GLenum SWAPCHAIN_FORMAT = GL_RGBA8;
 
-static float g_fTrackingOffset = 0.0f;//FIXME!
+static float g_fTrackingOffset = 0.f;//FIXME!
+
+static Jerk_Estimation leftHandJerkEstimation[3];
+static Jerk_Estimation rightHandJerkEstimation[3];
 
 struct Render_EGL {
     EGLDisplay Display;
@@ -399,7 +404,7 @@ void updateButtons() {
     }
 
     qiyu_ControllerData left;
-	qiyu_ControllerData right;
+    qiyu_ControllerData right;
 
     qiyu_GetControllerData(&left, &right);
 
@@ -484,7 +489,7 @@ uint8_t getControllerBattery(int index) {
     }
 
     qiyu_ControllerData left;
-	qiyu_ControllerData right;
+    qiyu_ControllerData right;
 
     qiyu_GetControllerData(&left, &right);
 
@@ -572,7 +577,7 @@ void eventsThread() {
 
             AlvrDeviceMotion headMotion = {};
             uint64_t targetTimestampNs =
-                    getTimestampNs(); // + alvr_get_prediction_offset_ns() will make the controller unstable
+                    getTimestampNs() + alvr_get_prediction_offset_ns();
             auto headTracking =
                     qiyu_PredictHeadPose((float) alvr_get_prediction_offset_ns() / 1e6);
             headMotion.device_id = HEAD_ID;
@@ -597,6 +602,10 @@ void eventsThread() {
 
             updateButtons();
 
+            double controllerDisplayTimeS =
+                    (double) alvr_get_prediction_offset_ns() / 1e9 *
+                    CTX.streamingConfig.controller_prediction_multiplier;
+
             if(qiyu_IsControllerInit()) {
                 qiyu_ControllerData left;
                 qiyu_ControllerData right;
@@ -604,10 +613,27 @@ void eventsThread() {
                 qiyu_GetControllerData(&left, &right);
 
                 if (left.isConnect) {
+                    handPositionf leftHand;
+                    float predictedPosition[3];
+					for (int i = 0; i < 3; i++) {
+						leftHand.Position = *(&left.position.x + i);
+						leftHand.LinearVelocity = *(&left.velocity.x + i);
+						leftHand.LinearAcceleration = *(&left.acceleration.x + i);
+                        leftHandJerkEstimation[i].rtU.acceleration = leftHand.LinearAcceleration;
+                        leftHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate;
+                        leftHandJerkEstimation[i].step();
+						leftHand.LinearJerk = leftHandJerkEstimation[i].rtY.jerk;
+						leftHand.LinearSnap = 0.f;
+						leftHand.LinearCrackle = 0.f;
+						predictedPosition[i] = handTrajectoryPrediction(leftHand, controllerDisplayTimeS);
+					}
+                    // The position is inverted in the z-axis
+                    predictedPosition[2] = left.position.z - (predictedPosition[2] - left.position.z);
+                    
                     AlvrDeviceMotion motion = {};
                     motion.device_id = LEFT_HAND_ID;
                     memcpy(&motion.orientation, &left.rotation, 4 * 4);
-                    memcpy(motion.position, &left.position, 4 * 3);
+                    memcpy(motion.position, predictedPosition, 4 * 3);
                     memcpy(motion.linear_velocity, &left.velocity, 4 * 3);
                     memcpy(motion.angular_velocity, &left.angVelocity, 4 * 3);
                     motion.position[1] -= g_fTrackingOffset;
@@ -616,10 +642,27 @@ void eventsThread() {
                 }
 
                 if (right.isConnect) {
+                    handPositionf rightHand;
+                    float predictedPosition[3];
+					for (int i = 0; i < 3; i++) {
+						rightHand.Position = *(&right.position.x + i);
+						rightHand.LinearVelocity = *(&right.velocity.x + i);
+						rightHand.LinearAcceleration = *(&right.acceleration.x + i);
+                        rightHandJerkEstimation[i].rtU.acceleration = rightHand.LinearAcceleration;
+                        rightHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate;
+                        rightHandJerkEstimation[i].step();
+                        rightHand.LinearJerk = rightHandJerkEstimation[i].rtY.jerk;
+						rightHand.LinearSnap = 0.f;
+						rightHand.LinearCrackle = 0.f;
+						predictedPosition[i] = handTrajectoryPrediction(rightHand, controllerDisplayTimeS);
+					}
+                    // The position is inverted in the z-axis
+					predictedPosition[2] = right.position.z - (predictedPosition[2] - right.position.z);
+
                     AlvrDeviceMotion motion = {};
                     motion.device_id = RIGHT_HAND_ID;
                     memcpy(&motion.orientation, &right.rotation, 4 * 4);
-                    memcpy(motion.position, &right.position, 4 * 3);
+                    memcpy(motion.position, predictedPosition, 4 * 3);
                     memcpy(motion.linear_velocity, &right.velocity, 4 * 3);
                     memcpy(motion.angular_velocity, &right.angVelocity, 4 * 3);
                     motion.position[1] -= g_fTrackingOffset;
