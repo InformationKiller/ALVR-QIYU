@@ -1,9 +1,10 @@
-<img src="https://github.com/alvr-org/ALVR/raw/master/resources/ALVR-Grey.svg" title="" alt="ALVR" width="100">
-<img src="https://pic1.iqiyipic.com/lequ/20220823/logo-en-white.png" title="" alt="QIYU" width="200">
+<img src="https://github.com/alvr-org/ALVR/raw/master/resources/ALVR-Grey.svg" title="" alt="ALVR" width="100"><img src="https://pic1.iqiyipic.com/lequ/20220823/logo-en-white.png" title="" alt="QIYU" width="200">
 
-# ALVR for QIYU
+# ALVR for QIYU / 奇遇
 
-Note: This is a modified version of ALVR, which only supports QIYU Dream series (including Lenovo Legion VR700) and QIYU 3.
+Note: This is a modified version of ALVR for QIYU Dream series (including Lenovo Legion VR700) and QIYU 3.
+
+注意：这是针对奇遇Dream系列（包括联想拯救者VR700）和奇遇3的ALVR修改版本。
 
 # ALVR - Air Light VR
 
