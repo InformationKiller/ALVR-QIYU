@@ -16,6 +16,49 @@
 #include "QiyuApi.h"
 #include "Hand_Trajectory_Prediction.h"
 #include "Jerk_Estimation.h"
+#include "QYRenderTarget.h"
+
+ /**
+  * Foveation
+  * https://www.khronos.org/registry/OpenGL/extensions/QCOM/QCOM_framebuffer_foveated.txt
+  * https://www.khronos.org/registry/OpenGL/extensions/QCOM/QCOM_texture_foveated.txt
+  * https://www.khronos.org/registry/OpenGL/extensions/QCOM/QCOM_texture_foveated2.txt
+  * https://www.khronos.org/registry/OpenGL/extensions/QCOM/QCOM_texture_foveated_subsampled_layout.txt
+  */
+#ifndef GL_EXT_framebuffer_foveated
+
+#define GL_FOVEATION_ENABLE_BIT_QCOM                    0x0001
+#define GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM         0x0002
+#define GL_FOVEATION_SUBSAMPLED_LAYOUT_METHOD_BIT_QCOM  0x0004
+//#define GL_TEXTURE_PREVIOUS_SOURCE_TEXTURE_QCOM         0x8BE8	//
+//#define GL_TEXTURE_FOVEATED_FRAME_OFFSET_QCOM           0x8BE9	//
+#define GL_TEXTURE_FOVEATED_FEATURE_BITS_QCOM           0x8BFB
+#define GL_TEXTURE_FOVEATED_MIN_PIXEL_DENSITY_QCOM      0x8BFC
+//#define GL_TEXTURE_FOVEATED_FEATURE_QUERY_QCOM          0x8BFD
+//#define GL_TEXTURE_FOVEATED_NUM_FOCAL_POINTS_QUERY_QCOM 0x8BFE
+//#define GL_FRAMEBUFFER_INCOMPLETE_FOVEATION_QCOM        0x8BFF
+//#define GL_MAX_SHADER_SUBSAMPLED_IMAGE_UNITS_QCOM       0x8FA1
+
+#ifdef GL_GLEXT_PROTOTYPES
+//GL_APICALL void GL_APIENTRY glFramebufferFoveationConfigQCOM(GLuint fbo, GLuint numLayers, GLuint focalPointsPerLayer, GLuint requiredFeatures, GLuint* gotFeatures);
+//GL_APICALL void GL_APIENTRY glFramebufferFoveationParametersQCOM(GLuint fbo, GLuint layer, GLuint focalPoint, GLfloat focalX, GLfloat focalY, GLfloat gainX, GLfloat gainY, GLfloat foveaArea);
+GL_APICALL void GL_APIENTRY glTextureFoveationParametersQCOM(GLuint texure, GLuint layer, GLuint focalPoint, GLfloat focalX, GLfloat focalY, GLfloat gainX, GLfloat gainY, GLfloat foveaArea);
+#endif
+
+#define GL_APIENTRYP GL_APIENTRY*
+typedef void (GL_APIENTRYP PFNGLTEXTUREFOVEATIONPARAMETERSEXT)(GLuint texture, GLuint layer, GLuint focalPoint, GLfloat focalX, GLfloat focalY, GLfloat gainX, GLfloat gainY, GLfloat foveaArea);
+PFNGLTEXTUREFOVEATIONPARAMETERSEXT glTextureFoveationParametersQCOM = NULL;
+//
+//typedef void (GL_APIENTRYP PFNGLFRAMEBUFFERFOVEATIONCONFIGEXT)(GLuint fbo, GLuint numLayers, GLuint focalPointsPerLayer, GLuint requiredFeatures, GLuint* gotFeatures);
+//PFNGLFRAMEBUFFERFOVEATIONCONFIGEXT glFramebufferFoveationConfigQCOM = NULL;
+//
+//typedef void (GL_APIENTRYP PFNGLFRAMEBUFFERFOVEATIONPARAMETERSEXT)(GLuint fbo, GLuint layer, GLuint focalPoint, GLfloat focalX, GLfloat focalY, GLfloat gainX, GLfloat gainY, GLfloat foveaArea);
+//PFNGLFRAMEBUFFERFOVEATIONPARAMETERSEXT glFramebufferFoveationParametersQCOM = NULL;
+//bool glTextureFoveationFrameOffsetQCOM = false;
+
+#endif//GL_EXT_framebuffer_foveated
+
+#define NUM_EYE_BUFFERS_     3   //FIXME! //TODO!
 
 void log(AlvrLogLevel level, const char *format, ...) {
     va_list args;
@@ -36,37 +79,38 @@ void log(AlvrLogLevel level, const char *format, ...) {
 #define error(...) log(ALVR_LOG_LEVEL_ERROR, __VA_ARGS__)
 #define info(...) log(ALVR_LOG_LEVEL_INFO, __VA_ARGS__)
 
-static const char *GlErrorString(GLenum error) {
-    switch (error) {
-    case GL_NO_ERROR:
-        return "GL_NO_ERROR";
-    case GL_INVALID_ENUM:
-        return "GL_INVALID_ENUM";
-    case GL_INVALID_VALUE:
-        return "GL_INVALID_VALUE";
-    case GL_INVALID_OPERATION:
-        return "GL_INVALID_OPERATION";
-    case GL_INVALID_FRAMEBUFFER_OPERATION:
-        return "GL_INVALID_FRAMEBUFFER_OPERATION";
-    case GL_OUT_OF_MEMORY:
-        return "GL_OUT_OF_MEMORY";
-    default:
-        return "unknown";
-    }
+namespace QY_GL_EXT
+{
+	bool InitFunction_Foveation()
+	{
+		glTextureFoveationParametersQCOM == NULL;
+		glTextureFoveationParametersQCOM = (PFNGLTEXTUREFOVEATIONPARAMETERSEXT)eglGetProcAddress("glTextureFoveationParametersQCOM");
+		if (glTextureFoveationParametersQCOM == NULL)
+		{
+			error("@@QY_GL_EXT::InitFunction_Foveation, glTextureFoveationParametersQCOM is not supported, fail to get proc address!");
+			return false;
+		}
+		//assert(glFramebufferFoveationConfigQCOM == NULL);
+		//glFramebufferFoveationConfigQCOM = (PFNGLFRAMEBUFFERFOVEATIONCONFIGEXT)eglGetProcAddress("glFramebufferFoveationConfigQCOM");
+		//if (glFramebufferFoveationConfigQCOM == NULL)
+		//{
+		//	LOGE_("@@QY_GL_EXT::InitFunction_Foveation, glFramebufferFoveationConfigQCOM is not supported, fail to get proc address!");
+		//	return false;
+		//}
+		//assert(glFramebufferFoveationParametersQCOM == NULL);
+		//glFramebufferFoveationParametersQCOM = (PFNGLFRAMEBUFFERFOVEATIONPARAMETERSEXT)eglGetProcAddress("glFramebufferFoveationParametersQCOM");
+		//if (glFramebufferFoveationParametersQCOM == NULL)
+		//{
+		//	LOGE_("@@QY_GL_EXT::InitFunction_Foveation, glFramebufferFoveationParametersQCOM is not supported, fail to get proc address!");
+		//	return false;
+		//}
+		return true;
+	}
+	bool IsSupport_Foveation()
+	{
+		return glTextureFoveationParametersQCOM != NULL;
+	}
 }
-
-[[maybe_unused]] static void GLCheckErrors(const char *file, int line) {
-    const GLenum error = glGetError();
-    if (error == GL_NO_ERROR) {
-        return;
-    }
-    error("GL error on %s : %d: %s", file, line, GlErrorString(error));
-    abort();
-}
-
-#define GL(func)                                                                                   \
-    func;                                                                                          \
-    GLCheckErrors(__FILE__, __LINE__)
 
 uint64_t HEAD_ID = alvr_path_string_to_hash("/user/head");
 uint64_t LEFT_HAND_ID = alvr_path_string_to_hash("/user/hand/left");
@@ -130,8 +174,8 @@ struct Render_EGL {
     EGLContext Context;
 };
 
-struct Swapchain {
-    ovrTextureSwapChain *inner;
+struct QYEyeBuffer {
+    QYRenderTarget eyeTarget[NUM_EYE_BUFFERS_];
     int index;
 };
 
@@ -155,16 +199,13 @@ public:
     StreamingStarted_Body streamingConfig = {};
 
     uint64_t ovrFrameIndex = 0;
+    uint64_t lastFrameTimeUs = 0;
 
     std::deque<std::pair<uint64_t, qiyu_HeadPoseState>> trackingFrameMap;
     std::mutex trackingFrameMutex;
 
-    // Swapchain lobbySwapchains[2] = {};
-    // Swapchain streamSwapchains[2] = {};
-
-    // Use one texture per eye, no need for swapchains.
-    GLuint lobbyTextures[2] = {0, 0};
-    GLuint streamTextures[2] = {0, 0};
+    QYEyeBuffer lobbyBuffers[2] = {};
+    QYEyeBuffer streamBuffers[2] = {};
 
     uint8_t hmdBattery = 0;
     bool hmdPlugged = false;
@@ -615,18 +656,18 @@ void eventsThread() {
                 if (left.isConnect) {
                     handPositionf leftHand;
                     float predictedPosition[3];
-					for (int i = 0; i < 3; i++) {
-						leftHand.Position = *(&left.position.x + i);
-						leftHand.LinearVelocity = *(&left.velocity.x + i);
-						leftHand.LinearAcceleration = *(&left.acceleration.x + i);
+                    for (int i = 0; i < 3; i++) {
+                        leftHand.Position = *(&left.position.x + i);
+                        leftHand.LinearVelocity = *(&left.velocity.x + i);
+                        leftHand.LinearAcceleration = *(&left.acceleration.x + i);
                         leftHandJerkEstimation[i].rtU.acceleration = leftHand.LinearAcceleration;
                         leftHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate;
                         leftHandJerkEstimation[i].step();
-						leftHand.LinearJerk = leftHandJerkEstimation[i].rtY.jerk;
-						leftHand.LinearSnap = 0.f;
-						leftHand.LinearCrackle = 0.f;
-						predictedPosition[i] = handTrajectoryPrediction(leftHand, controllerDisplayTimeS);
-					}
+                        leftHand.LinearJerk = leftHandJerkEstimation[i].rtY.jerk;
+                        leftHand.LinearSnap = 0.f;
+                        leftHand.LinearCrackle = 0.f;
+                        predictedPosition[i] = handTrajectoryPrediction(leftHand, controllerDisplayTimeS);
+                    }
                     // The position is inverted in the z-axis
                     predictedPosition[2] = left.position.z - (predictedPosition[2] - left.position.z);
                     
@@ -644,18 +685,18 @@ void eventsThread() {
                 if (right.isConnect) {
                     handPositionf rightHand;
                     float predictedPosition[3];
-					for (int i = 0; i < 3; i++) {
-						rightHand.Position = *(&right.position.x + i);
-						rightHand.LinearVelocity = *(&right.velocity.x + i);
-						rightHand.LinearAcceleration = *(&right.acceleration.x + i);
+                    for (int i = 0; i < 3; i++) {
+                        rightHand.Position = *(&right.position.x + i);
+                        rightHand.LinearVelocity = *(&right.velocity.x + i);
+                        rightHand.LinearAcceleration = *(&right.acceleration.x + i);
                         rightHandJerkEstimation[i].rtU.acceleration = rightHand.LinearAcceleration;
                         rightHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate;
                         rightHandJerkEstimation[i].step();
                         rightHand.LinearJerk = rightHandJerkEstimation[i].rtY.jerk;
-						rightHand.LinearSnap = 0.f;
-						rightHand.LinearCrackle = 0.f;
-						predictedPosition[i] = handTrajectoryPrediction(rightHand, controllerDisplayTimeS);
-					}
+                        rightHand.LinearSnap = 0.f;
+                        rightHand.LinearCrackle = 0.f;
+                        predictedPosition[i] = handTrajectoryPrediction(rightHand, controllerDisplayTimeS);
+                    }
                     // The position is inverted in the z-axis
 					predictedPosition[2] = right.position.z - (predictedPosition[2] - right.position.z);
 
@@ -768,6 +809,7 @@ Java_alvr_client_VRActivity_initializeNative(JNIEnv *env, jobject context) {
     eglInit();
 
     memset(CTX.hapticsState, 0, sizeof(CTX.hapticsState));
+    QY_GL_EXT::InitFunction_Foveation();
     qiyu_Init(java.ActivityObject,
 			  java.Vm,
 			  qiyu_GraphicsApi::GA_OpenGLES,
@@ -831,30 +873,16 @@ extern "C" JNIEXPORT void JNICALL Java_alvr_client_VRActivity_onResumeNative(
     qiyu_SetTrackingOriginMode(qiyu_TrackingOriginMode::TM_Ground);
 
     std::vector<int32_t> textureHandlesBuffer[2];
+    bool isSupport_Foveation = QY_GL_EXT::IsSupport_Foveation();
     for (int eye = 0; eye < 2; eye++) {
-        GL(glGenTextures(1, &CTX.lobbyTextures[eye]));
-        GL(glBindTexture(GL_TEXTURE_2D, CTX.lobbyTextures[eye]));
-        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
-        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
-        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
-        GL(glTexImage2D(GL_TEXTURE_2D,
-                        0,
-                        GL_RGB,
-                        CTX.recommendedViewWidth,
-                        CTX.recommendedViewHeight,
-                        0,
-                        GL_RGB,
-                        GL_UNSIGNED_BYTE,
-                        nullptr));
-        int size = 1;
-
-        for (int index = 0; index < size; index++) {
-            auto handle = CTX.lobbyTextures[eye];
+        for (int index = 0; index < NUM_EYE_BUFFERS_; index++) {
+            CTX.lobbyBuffers[eye].eyeTarget[index].Init(
+                isSupport_Foveation, GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM, false, 
+                CTX.recommendedViewWidth, CTX.recommendedViewHeight, 1, GL_RGBA8, false, false);
+            auto handle = CTX.lobbyBuffers[eye].eyeTarget[index].GetColorAttachment();
             textureHandlesBuffer[eye].push_back(handle);
         }
- 
-        // CTX.lobbySwapchains[eye].index = 0;
+        CTX.lobbyBuffers[eye].index = 0;
     }
     const int32_t *textureHandles[2] = {&textureHandlesBuffer[0][0], &textureHandlesBuffer[1][0]};
 
@@ -862,7 +890,7 @@ extern "C" JNIEXPORT void JNICALL Java_alvr_client_VRActivity_onResumeNative(
     CTX.eventsThread = std::thread(eventsThread);
 
     alvr_resume_opengl(CTX.recommendedViewWidth, CTX.recommendedViewHeight, textureHandles,
-                       1);
+                       textureHandlesBuffer[0].size());
     alvr_resume();
 
     // vrapi_SetDisplayRefreshRate(CTX.ovrContext, CTX.refreshRate);
@@ -875,30 +903,17 @@ Java_alvr_client_VRActivity_onStreamStartNative(JNIEnv *_env, jobject _context) 
     CTX.refreshRate = CTX.streamingConfig.fps;
 
     std::vector<int32_t> textureHandlesBuffer[2];
+    bool isSupport_Foveation = QY_GL_EXT::IsSupport_Foveation();
     for (int eye = 0; eye < 2; eye++) {
-        GL(glGenTextures(1, &CTX.streamTextures[eye]));
-        GL(glBindTexture(GL_TEXTURE_2D, CTX.streamTextures[eye]));
-        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
-        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
-        GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
-        GL(glTexImage2D(GL_TEXTURE_2D,
-                        0,
-                        GL_RGB,
-                        CTX.streamingConfig.view_width,
-                        CTX.streamingConfig.view_height,
-                        0,
-                        GL_RGB,
-                        GL_UNSIGNED_BYTE,
-                        nullptr));
-        int size = 1;
-
-        for (int index = 0; index < size; index++) {
-            auto handle = CTX.streamTextures[eye];
+        for (int index = 0; index < NUM_EYE_BUFFERS_; index++) {
+            CTX.streamBuffers[eye].eyeTarget[index].Init(
+                isSupport_Foveation, GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM, false, 
+                CTX.streamingConfig.view_width, CTX.streamingConfig.view_height, 1, GL_RGBA8, false, false);
+            auto handle = CTX.streamBuffers[eye].eyeTarget[index].GetColorAttachment();
             textureHandlesBuffer[eye].push_back(handle);
         }
 
-        // CTX.streamSwapchains[eye].index = 0;
+        CTX.streamBuffers[eye].index = 0;
     }
     const int32_t *textureHandles[2] = {&textureHandlesBuffer[0][0], &textureHandlesBuffer[1][0]};
 
@@ -945,8 +960,7 @@ Java_alvr_client_VRActivity_onStreamStartNative(JNIEnv *_env, jobject _context) 
     getPlayspaceArea(&areaWidth, &areaHeight);
     alvr_send_playspace(areaWidth, areaHeight);
 
-    // alvr_start_stream_opengl(textureHandles, textureHandlesBuffer[0].size());
-    alvr_start_stream_opengl(textureHandles, 1);
+    alvr_start_stream_opengl(textureHandles, textureHandlesBuffer[0].size());
 
     CTX.streaming = true;
 }
@@ -955,7 +969,11 @@ extern "C" JNIEXPORT void JNICALL
 Java_alvr_client_VRActivity_onStreamStopNative(JNIEnv *_env, jobject _context) {
     CTX.streaming = false;
 
-    GL(glDeleteTextures(2, CTX.streamTextures));
+    for (int eye = 0; eye < 2; eye++) {
+        for (int index = 0; index < NUM_EYE_BUFFERS_; index++) {
+            CTX.streamBuffers[eye].eyeTarget[index].Release();
+        }
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -969,7 +987,11 @@ Java_alvr_client_VRActivity_onPauseNative(JNIEnv *_env, jobject _context) {
         CTX.running = false;
         CTX.eventsThread.join();
     }
-    GL(glDeleteTextures(2, CTX.lobbyTextures));
+    for (int eye = 0; eye < 2; eye++) {
+        for (int index = 0; index < NUM_EYE_BUFFERS_; index++) {
+            CTX.lobbyBuffers[eye].eyeTarget[index].Release();
+        }
+    }
 
     qiyu_EndVR();
 
@@ -987,6 +1009,11 @@ Java_alvr_client_VRActivity_renderNative(JNIEnv *_env, jobject _context) {
     qiyu_HeadPoseState tracking;
     qiyu_FrameParam frameParam;
     memset(&frameParam, 0, sizeof(frameParam));
+
+    uint64_t currentUs = getTimestampUs();
+    float tickSecond = (currentUs - CTX.lastFrameTimeUs) / 1000000.0;
+    qiyu_Update(tickSecond);
+    CTX.lastFrameTimeUs = currentUs;
 
     if (CTX.streaming) {
         void *streamHardwareBuffer = nullptr;
@@ -1011,20 +1038,23 @@ Java_alvr_client_VRActivity_renderNative(JNIEnv *_env, jobject _context) {
             }
         }
 
-        // int swapchainIndices[2] = {CTX.streamSwapchains[0].index,
-        //                            CTX.streamSwapchains[1].index};
-        int swapchainIndices[2] = {0, 0};
+        int swapchainIndices[2] = {CTX.streamBuffers[0].index,
+                                   CTX.streamBuffers[1].index};
+        qiyu_StartEye(false, EYE_Left, TT_Texture);
+        qiyu_StartEye(false, EYE_Right, TT_Texture);
         alvr_render_stream_opengl(streamHardwareBuffer, swapchainIndices);
+        qiyu_EndEye(false, EYE_Left, TT_Texture);
+        qiyu_EndEye(false, EYE_Right, TT_Texture);
 
         float vsyncQueueMs = qiyu_PredictDisplayTime();
         alvr_report_submit(timestampNs, vsyncQueueMs * 1e6);
 
         for (int eye = 0; eye < 2; eye++) {
-            frameParam.renderLayers[eye].imageHandle = CTX.streamTextures[eye];
+            frameParam.renderLayers[eye].imageHandle = CTX.streamBuffers[eye].eyeTarget[CTX.streamBuffers[eye].index].GetColorAttachment();
             frameParam.renderLayers[eye].imageType = TT_Texture;
             CreateLayout_(0.0f, 0.0f, 1.0f, 1.0f, &frameParam.renderLayers[eye].imageCoords);//FIXME! //TODO!
             frameParam.renderLayers[eye].eyeMask = eye ? RL_EyeMask_Right : RL_EyeMask_Left;
-            // CTX.streamSwapchains[eye].index = (CTX.streamSwapchains[eye].index + 1) % 3;
+            CTX.streamBuffers[eye].index = (CTX.streamBuffers[eye].index + 1) % NUM_EYE_BUFFERS_;
         }
     } else {
         qiyu_DeviceInfo di = qiyu_GetDeviceInfo();
@@ -1056,17 +1086,21 @@ Java_alvr_client_VRActivity_renderNative(JNIEnv *_env, jobject _context) {
             eyeInputs[eye].position[2] = -v.M[2][3];
             eyeInputs[eye].fov = getFov(&di, eye);
 
-            // swapchainIndices[eye] = CTX.lobbySwapchains[eye].index;
-            swapchainIndices[eye] = 0;
+            swapchainIndices[eye] = CTX.lobbyBuffers[eye].index;
         }
+        qiyu_StartEye(false, EYE_Left, TT_Texture);
+        qiyu_StartEye(false, EYE_Right, TT_Texture);
         alvr_render_lobby_opengl(eyeInputs, swapchainIndices);
+        qiyu_EndEye(false, EYE_Left, TT_Texture);
+        qiyu_EndEye(false, EYE_Right, TT_Texture);
+
 
         for (int eye = 0; eye < 2; eye++) {
-            frameParam.renderLayers[eye].imageHandle = CTX.lobbyTextures[eye];
+            frameParam.renderLayers[eye].imageHandle = CTX.lobbyBuffers[eye].eyeTarget[CTX.lobbyBuffers[eye].index].GetColorAttachment();
             frameParam.renderLayers[eye].imageType = TT_Texture;
             CreateLayout_(0.0f, 0.0f, 1.0f, 1.0f, &frameParam.renderLayers[eye].imageCoords);//FIXME! //TODO!
             frameParam.renderLayers[eye].eyeMask = eye ? RL_EyeMask_Right : RL_EyeMask_Left;
-            // CTX.lobbySwapchains[eye].index = (CTX.lobbySwapchains[eye].index + 1) % 3;
+            CTX.lobbyBuffers[eye].index = (CTX.lobbyBuffers[eye].index + 1) % NUM_EYE_BUFFERS_;
         }
     }
 

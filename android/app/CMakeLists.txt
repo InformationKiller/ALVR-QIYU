@@ -13,6 +13,8 @@ add_library(native_lib SHARED
         src/main/cpp/cpp_main.cpp
         src/main/cpp/Hand_Trajectory_Prediction.cpp
         src/main/cpp/Jerk_Estimation.cpp
+        src/main/cpp/QYRenderTarget.cpp
+        src/main/cpp/QYUtil.cpp
         )
 
 include_directories(src/main/cpp)

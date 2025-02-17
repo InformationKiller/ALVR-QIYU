@@ -40,11 +40,6 @@ typedef struct handPositionf_ {
     float LinearCrackle;
 } handPositionf;
 
-// Returns the predicted position based on the specified prediction time in seconds.
-// Pass PredictionInSeconds value of 0.0 to request the most recent sensor reading.
-// Input: ovr, device ID, prediction time
-// Output: ovrTracking structure containing the device's predicted tracking state.
-
 /* @brief Predicts the hand trajectory based on the current hand position.
  * @param[in] HandPosition The current hand position.
  * @param[in] PredictionInSeconds The seconds this position was predicted ahead.
