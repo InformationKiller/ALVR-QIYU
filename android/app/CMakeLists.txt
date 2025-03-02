@@ -11,8 +11,8 @@ link_directories(../../build/alvr_client_core/${ANDROID_ABI})
 
 add_library(native_lib SHARED
         src/main/cpp/cpp_main.cpp
-        src/main/cpp/Hand_Trajectory_Prediction.cpp
-        src/main/cpp/Jerk_Estimation.cpp
+        src/main/cpp/Hand_Trajectory_Prediction/Hand_Trajectory_Prediction.cpp
+        src/main/cpp/Jerk_Estimation/Jerk_Estimation.cpp
         src/main/cpp/QYRenderTarget.cpp
         src/main/cpp/QYUtil.cpp
         )

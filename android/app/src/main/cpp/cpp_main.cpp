@@ -14,8 +14,8 @@
 #include <vector>
 #include <time.h>
 #include "QiyuApi.h"
-#include "Hand_Trajectory_Prediction.h"
-#include "Jerk_Estimation.h"
+#include "Hand_Trajectory_Prediction/Hand_Trajectory_Prediction.h"
+#include "Jerk_Estimation/Jerk_Estimation.h"
 #include "QYRenderTarget.h"
 
  /**
@@ -653,6 +653,16 @@ void eventsThread() {
 
                 qiyu_GetControllerData(&left, &right);
 
+                // From left-handed to right-handed
+                left.velocity.z = -left.velocity.z;
+                right.velocity.z = -right.velocity.z;
+                left.acceleration.z = -left.acceleration.z;
+                right.acceleration.z = -right.acceleration.z;
+                left.angVelocity.z = -left.angVelocity.z;
+                right.angVelocity.z = -right.angVelocity.z;
+                left.angAcceleration.z = -left.angAcceleration.z;
+                right.angAcceleration.z = -right.angAcceleration.z;
+
                 if (left.isConnect) {
                     handPositionf leftHand;
                     float predictedPosition[3];
@@ -661,16 +671,14 @@ void eventsThread() {
                         leftHand.LinearVelocity = *(&left.velocity.x + i);
                         leftHand.LinearAcceleration = *(&left.acceleration.x + i);
                         leftHandJerkEstimation[i].rtU.acceleration = leftHand.LinearAcceleration;
-                        leftHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate;
+                        leftHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate / 3;
                         leftHandJerkEstimation[i].step();
                         leftHand.LinearJerk = leftHandJerkEstimation[i].rtY.jerk;
                         leftHand.LinearSnap = 0.f;
                         leftHand.LinearCrackle = 0.f;
                         predictedPosition[i] = handTrajectoryPrediction(leftHand, controllerDisplayTimeS);
                     }
-                    // The position is inverted in the z-axis
-                    predictedPosition[2] = left.position.z - (predictedPosition[2] - left.position.z);
-                    
+
                     AlvrDeviceMotion motion = {};
                     motion.device_id = LEFT_HAND_ID;
                     memcpy(&motion.orientation, &left.rotation, 4 * 4);
@@ -690,15 +698,13 @@ void eventsThread() {
                         rightHand.LinearVelocity = *(&right.velocity.x + i);
                         rightHand.LinearAcceleration = *(&right.acceleration.x + i);
                         rightHandJerkEstimation[i].rtU.acceleration = rightHand.LinearAcceleration;
-                        rightHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate;
+                        rightHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate / 3;
                         rightHandJerkEstimation[i].step();
                         rightHand.LinearJerk = rightHandJerkEstimation[i].rtY.jerk;
                         rightHand.LinearSnap = 0.f;
                         rightHand.LinearCrackle = 0.f;
                         predictedPosition[i] = handTrajectoryPrediction(rightHand, controllerDisplayTimeS);
                     }
-                    // The position is inverted in the z-axis
-					predictedPosition[2] = right.position.z - (predictedPosition[2] - right.position.z);
 
                     AlvrDeviceMotion motion = {};
                     motion.device_id = RIGHT_HAND_ID;
