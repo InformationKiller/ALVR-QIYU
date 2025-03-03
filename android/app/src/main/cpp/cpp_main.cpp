@@ -842,6 +842,7 @@ Java_alvr_client_VRActivity_initializeNative(JNIEnv *env, jobject context) {
                     refreshRatesCount,
                     false);
     alvr_initialize_opengl();
+    qiyu_PostSetEyeBufferSize(CTX.recommendedViewWidth, CTX.recommendedViewHeight);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -891,6 +892,7 @@ extern "C" JNIEXPORT void JNICALL Java_alvr_client_VRActivity_onResumeNative(
         CTX.lobbyBuffers[eye].index = 0;
     }
     const int32_t *textureHandles[2] = {&textureHandlesBuffer[0][0], &textureHandlesBuffer[1][0]};
+    qiyu_PostSetEyeBufferSize(CTX.recommendedViewWidth, CTX.recommendedViewHeight);
 
     CTX.running = true;
     CTX.eventsThread = std::thread(eventsThread);
@@ -922,6 +924,7 @@ Java_alvr_client_VRActivity_onStreamStartNative(JNIEnv *_env, jobject _context) 
         CTX.streamBuffers[eye].index = 0;
     }
     const int32_t *textureHandles[2] = {&textureHandlesBuffer[0][0], &textureHandlesBuffer[1][0]};
+    qiyu_PostSetEyeBufferSize(CTX.streamingConfig.view_width, CTX.streamingConfig.view_height);
 
     // On Oculus Quest, without ExtraLatencyMode frames passed to vrapi_SubmitFrame2 are sometimes
     // discarded from VrAPI(?). Which introduces stutter animation. I think the number of discarded
