@@ -884,7 +884,7 @@ extern "C" JNIEXPORT void JNICALL Java_alvr_client_VRActivity_onResumeNative(
     for (int eye = 0; eye < 2; eye++) {
         for (int index = 0; index < NUM_EYE_BUFFERS_; index++) {
             CTX.lobbyBuffers[eye].eyeTarget[index].Init(
-                isSupport_Foveation, GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM, false, 
+                false, GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM, false, 
                 CTX.recommendedViewWidth, CTX.recommendedViewHeight, 1, GL_RGBA8, false, false);
             auto handle = CTX.lobbyBuffers[eye].eyeTarget[index].GetColorAttachment();
             textureHandlesBuffer[eye].push_back(handle);
@@ -915,7 +915,7 @@ Java_alvr_client_VRActivity_onStreamStartNative(JNIEnv *_env, jobject _context) 
     for (int eye = 0; eye < 2; eye++) {
         for (int index = 0; index < NUM_EYE_BUFFERS_; index++) {
             CTX.streamBuffers[eye].eyeTarget[index].Init(
-                isSupport_Foveation, GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM, false, 
+                false, GL_FOVEATION_ENABLE_BIT_QCOM | GL_FOVEATION_SCALED_BIN_METHOD_BIT_QCOM, false, 
                 CTX.streamingConfig.view_width, CTX.streamingConfig.view_height, 1, GL_RGBA8, false, false);
             auto handle = CTX.streamBuffers[eye].eyeTarget[index].GetColorAttachment();
             textureHandlesBuffer[eye].push_back(handle);
