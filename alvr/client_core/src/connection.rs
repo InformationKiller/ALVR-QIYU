@@ -161,17 +161,17 @@ fn connection_pipeline(
         loop {
             check_interrupt!(IS_ALIVE.value());
 
-            if let Err(e) = announcer_socket.broadcast() {
-                warn!("Broadcast error: {e}");
+            // if let Err(e) = announcer_socket.broadcast() {
+            //     warn!("Broadcast error: {e}");
 
-                set_hud_message(NETWORK_UNREACHABLE_MESSAGE);
+            //     set_hud_message(NETWORK_UNREACHABLE_MESSAGE);
 
-                thread::sleep(RETRY_CONNECT_MIN_INTERVAL);
+            //     thread::sleep(RETRY_CONNECT_MIN_INTERVAL);
 
-                set_hud_message(INITIAL_MESSAGE);
+            //     set_hud_message(INITIAL_MESSAGE);
 
-                return Ok(());
-            }
+            //     return Ok(());
+            // }
 
             let maybe_pair = runtime.block_on(async {
                 tokio::select! {

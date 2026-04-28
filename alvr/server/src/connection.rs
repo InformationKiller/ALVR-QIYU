@@ -721,30 +721,30 @@ async fn connection_pipeline(
         let input_device = AudioDevice::new(
             Some(settings.audio.linux_backend),
             &desc.input_device_id,
-            AudioDeviceType::VirtualMicrophoneInput,
+            AudioDeviceType::Output,
         )?;
         let receiver = stream_socket.subscribe_to_stream(AUDIO).await?;
 
-        #[cfg(windows)]
-        {
-            let microphone_device = AudioDevice::new(
-                None,
-                &desc.output_device_id,
-                AudioDeviceType::VirtualMicrophoneOutput {
-                    matching_input_device_name: input_device.name()?,
-                },
-            )?;
-            let microphone_device_id = alvr_audio::get_windows_device_id(&microphone_device)?;
-            unsafe {
-                crate::SetOpenvrProperty(
-                    *HEAD_ID,
-                    crate::to_cpp_openvr_prop(
-                        alvr_session::OpenvrPropertyKey::AudioDefaultRecordingDeviceId,
-                        alvr_session::OpenvrPropValue::String(microphone_device_id),
-                    ),
-                )
-            }
-        }
+        // #[cfg(windows)]
+        // {
+        //     let microphone_device = AudioDevice::new(
+        //         None,
+        //         &desc.output_device_id,
+        //         AudioDeviceType::VirtualMicrophoneOutput {
+        //             matching_input_device_name: input_device.name()?,
+        //         },
+        //     )?;
+        //     let microphone_device_id = alvr_audio::get_windows_device_id(&microphone_device)?;
+        //     unsafe {
+        //         crate::SetOpenvrProperty(
+        //             *HEAD_ID,
+        //             crate::to_cpp_openvr_prop(
+        //                 alvr_session::OpenvrPropertyKey::AudioDefaultRecordingDeviceId,
+        //                 alvr_session::OpenvrPropValue::String(microphone_device_id),
+        //             ),
+        //         )
+        //     }
+        // }
 
         Box::pin(alvr_audio::play_audio_loop(
             input_device,

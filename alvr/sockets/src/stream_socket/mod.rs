@@ -25,6 +25,7 @@ use throttled_udp::{ThrottledUdpStreamReceiveSocket, ThrottledUdpStreamSendSocke
 use tokio::net;
 use tokio::sync::{mpsc, Mutex};
 use udp::{UdpStreamReceiveSocket, UdpStreamSendSocket};
+use std::collections::BTreeMap;
 
 #[derive(Clone)]
 enum StreamSendSocket {
@@ -166,29 +167,51 @@ pub struct ReceivedPacket<T> {
 pub struct StreamReceiver<T> {
     receiver: StreamReceiverType,
     next_packet_index: u32,
+    buffer: BTreeMap<u32, BytesMut>,
     _phantom: PhantomData<T>,
 }
 
 impl<T: DeserializeOwned> StreamReceiver<T> {
     pub async fn recv(&mut self) -> StrResult<ReceivedPacket<T>> {
-        let mut bytes = match &mut self.receiver {
-            StreamReceiverType::Queue(receiver) => receiver.recv().await.ok_or_else(enone!())?,
-        };
+        loop {
+            if let Some(mut bytes) = self.buffer.remove(&self.next_packet_index) {
+                let packet_index = self.next_packet_index;
+                self.next_packet_index += 1;
 
-        let packet_index = bytes.get_u32();
-        let had_packet_loss = packet_index != self.next_packet_index;
-        self.next_packet_index = packet_index + 1;
+                let mut bytes_reader = bytes.reader();
+                let header = bincode::deserialize_from(&mut bytes_reader).map_err(err!())?;
+                let buffer = bytes_reader.into_inner();
 
-        let mut bytes_reader = bytes.reader();
-        let header = bincode::deserialize_from(&mut bytes_reader).map_err(err!())?;
-        let buffer = bytes_reader.into_inner();
+                return Ok(ReceivedPacket {
+                    header,
+                    buffer,
+                    had_packet_loss: false,
+                });
+            }
 
-        // At this point, "buffer" does not include the header anymore
-        Ok(ReceivedPacket {
-            header,
-            buffer,
-            had_packet_loss,
-        })
+            if self.buffer.len() >= 4 {
+                let (min_index, mut bytes) = self.buffer.pop_first().unwrap();
+                let had_packet_loss = min_index != self.next_packet_index;
+                self.next_packet_index = min_index + 1;
+
+                let mut bytes_reader = bytes.reader();
+                let header = bincode::deserialize_from(&mut bytes_reader).map_err(err!())?;
+                let buffer = bytes_reader.into_inner();
+
+                return Ok(ReceivedPacket {
+                    header,
+                    buffer,
+                    had_packet_loss,
+                });
+            }
+
+            let mut bytes = match &mut self.receiver {
+                StreamReceiverType::Queue(receiver) => receiver.recv().await.ok_or_else(enone!())?,
+            };
+
+            let packet_index = bytes.get_u32();
+            self.buffer.insert(packet_index, bytes);
+        }
     }
 }
 
@@ -327,6 +350,7 @@ impl StreamSocket {
         Ok(StreamReceiver {
             receiver: StreamReceiverType::Queue(dequeuer),
             next_packet_index: 0,
+            buffer: BTreeMap::new(),
             _phantom: PhantomData,
         })
     }

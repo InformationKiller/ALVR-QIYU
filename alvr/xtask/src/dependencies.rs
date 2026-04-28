@@ -63,14 +63,14 @@ pub fn prepare_ffmpeg_windows() {
         &sh,
         &format!(
             "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/{}",
-            "ffmpeg-n5.1-latest-win64-gpl-shared-5.1.zip"
+            "ffmpeg-n7.1-latest-win64-gpl-shared-7.1.zip"
         ),
         &download_path,
     )
     .unwrap();
 
     fs::rename(
-        download_path.join("ffmpeg-n5.1-latest-win64-gpl-shared-5.1"),
+        download_path.join("ffmpeg-n7.1-latest-win64-gpl-shared-7.1"),
         download_path.join("ffmpeg"),
     )
     .unwrap();
