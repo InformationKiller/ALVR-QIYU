@@ -38,7 +38,7 @@ use std::{
     ptr,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Once,
+        Arc, Once, OnceLock
     },
     thread,
     time::{Duration, Instant},
@@ -84,6 +84,10 @@ static RGBTOYUV420_SHADER_COMP_SPV: &[u8] =
     include_bytes!("../cpp/platform/linux/shader/rgbtoyuv420.comp.spv");
 
 static IS_ALIVE: Lazy<Arc<RelaxedAtomic>> = Lazy::new(|| Arc::new(RelaxedAtomic::new(false)));
+
+static LOG_SENDER: OnceLock<broadcast::Sender<String>> = OnceLock::new();
+static LEGACY_EVENTS_SENDER: OnceLock<broadcast::Sender<String>> = OnceLock::new();
+static EVENTS_SENDER: OnceLock<broadcast::Sender<String>> = OnceLock::new();
 
 pub enum WindowType {
     Alcro(alcro::UI),
@@ -182,32 +186,11 @@ fn init() {
         events_sender.clone(),
     );
 
-    if let Some(runtime) = WEBSERVER_RUNTIME.lock().as_mut() {
-        // Acquire and drop the data manager lock to create session.json if not present
-        // this is needed until Settings.cpp is replaced with Rust. todo: remove
-        SERVER_DATA_MANAGER.write().session_mut();
+    LOG_SENDER.set(log_sender).unwrap();
+    LEGACY_EVENTS_SENDER.set(legacy_events_sender).unwrap();
+    EVENTS_SENDER.set(events_sender).unwrap();
 
-        let connections = SERVER_DATA_MANAGER
-            .read()
-            .session()
-            .client_connections
-            .clone();
-        for (hostname, connection) in connections {
-            if !connection.trusted {
-                SERVER_DATA_MANAGER
-                    .write()
-                    .update_client_list(hostname, ClientListAction::RemoveEntry);
-            }
-        }
-
-        runtime.spawn(alvr_common::show_err_async(web_server::web_server(
-            log_sender,
-            legacy_events_sender,
-            events_sender,
-        )));
-
-        thread::spawn(|| alvr_common::show_err(dashboard::ui_thread()));
-    }
+    SERVER_DATA_MANAGER.write().session_mut();
 
     {
         let mut data_manager = SERVER_DATA_MANAGER.write();
@@ -248,6 +231,33 @@ fn init() {
         .unwrap()
         .into_raw();
     };
+}
+
+fn init_web_server() {
+    if let Some(runtime) = WEBSERVER_RUNTIME.lock().as_mut() {
+        // Acquire and drop the data manager lock to create session.json if not present
+        // this is needed until Settings.cpp is replaced with Rust. todo: remove
+        let connections = SERVER_DATA_MANAGER
+            .read()
+            .session()
+            .client_connections
+            .clone();
+        for (hostname, connection) in connections {
+            if !connection.trusted {
+                SERVER_DATA_MANAGER
+                    .write()
+                    .update_client_list(hostname, ClientListAction::RemoveEntry);
+            }
+        }
+
+        runtime.spawn(alvr_common::show_err_async(web_server::web_server(
+            LOG_SENDER.get().unwrap().clone(),
+            LEGACY_EVENTS_SENDER.get().unwrap().clone(),
+            EVENTS_SENDER.get().unwrap().clone(),
+        )));
+
+        thread::spawn(|| alvr_common::show_err(dashboard::ui_thread()));
+    }
 }
 
 /// # Safety
@@ -455,6 +465,12 @@ pub unsafe extern "C" fn HmdDriverFactory(
     })
     .join()
     .ok();
+
+    // Dont Crash My Steam
+    if !return_code.is_null() && unsafe { *return_code == 0 } {
+        static INIT_WEB_ONCE: Once = Once::new();
+        INIT_WEB_ONCE.call_once(init_web_server);
+    }
 
     PTR_USIZE.get().unwrap().load(Ordering::Relaxed) as _
 }
