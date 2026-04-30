@@ -664,25 +664,25 @@ void eventsThread() {
                 right.angAcceleration.z = -right.angAcceleration.z;
 
                 if (left.isConnect) {
-                    handPositionf leftHand;
-                    float predictedPosition[3];
-                    for (int i = 0; i < 3; i++) {
-                        leftHand.Position = *(&left.position.x + i);
-                        leftHand.LinearVelocity = *(&left.velocity.x + i);
-                        leftHand.LinearAcceleration = *(&left.acceleration.x + i);
-                        leftHandJerkEstimation[i].rtU.acceleration = leftHand.LinearAcceleration;
-                        leftHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate / 3;
-                        leftHandJerkEstimation[i].step();
-                        leftHand.LinearJerk = leftHandJerkEstimation[i].rtY.jerk;
-                        leftHand.LinearSnap = 0.f;
-                        leftHand.LinearCrackle = 0.f;
-                        predictedPosition[i] = handTrajectoryPrediction(leftHand, controllerDisplayTimeS);
-                    }
+                    // handPositionf leftHand;
+                    // float predictedPosition[3];
+                    // for (int i = 0; i < 3; i++) {
+                    //     leftHand.Position = *(&left.position.x + i);
+                    //     leftHand.LinearVelocity = *(&left.velocity.x + i);
+                    //     leftHand.LinearAcceleration = *(&left.acceleration.x + i);
+                    //     leftHandJerkEstimation[i].rtU.acceleration = leftHand.LinearAcceleration;
+                    //     leftHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate / 3;
+                    //     leftHandJerkEstimation[i].step();
+                    //     leftHand.LinearJerk = leftHandJerkEstimation[i].rtY.jerk;
+                    //     leftHand.LinearSnap = 0.f;
+                    //     leftHand.LinearCrackle = 0.f;
+                    //     predictedPosition[i] = handTrajectoryPrediction(leftHand, controllerDisplayTimeS);
+                    // }
 
                     AlvrDeviceMotion motion = {};
                     motion.device_id = LEFT_HAND_ID;
                     memcpy(&motion.orientation, &left.rotation, 4 * 4);
-                    memcpy(motion.position, predictedPosition, 4 * 3);
+                    memcpy(motion.position, &left.position, 4 * 3);
                     memcpy(motion.linear_velocity, &left.velocity, 4 * 3);
                     memcpy(motion.angular_velocity, &left.angVelocity, 4 * 3);
                     motion.position[1] -= g_fTrackingOffset;
@@ -691,25 +691,25 @@ void eventsThread() {
                 }
 
                 if (right.isConnect) {
-                    handPositionf rightHand;
-                    float predictedPosition[3];
-                    for (int i = 0; i < 3; i++) {
-                        rightHand.Position = *(&right.position.x + i);
-                        rightHand.LinearVelocity = *(&right.velocity.x + i);
-                        rightHand.LinearAcceleration = *(&right.acceleration.x + i);
-                        rightHandJerkEstimation[i].rtU.acceleration = rightHand.LinearAcceleration;
-                        rightHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate / 3;
-                        rightHandJerkEstimation[i].step();
-                        rightHand.LinearJerk = rightHandJerkEstimation[i].rtY.jerk;
-                        rightHand.LinearSnap = 0.f;
-                        rightHand.LinearCrackle = 0.f;
-                        predictedPosition[i] = handTrajectoryPrediction(rightHand, controllerDisplayTimeS);
-                    }
+                    // handPositionf rightHand;
+                    // float predictedPosition[3];
+                    // for (int i = 0; i < 3; i++) {
+                    //     rightHand.Position = *(&right.position.x + i);
+                    //     rightHand.LinearVelocity = *(&right.velocity.x + i);
+                    //     rightHand.LinearAcceleration = *(&right.acceleration.x + i);
+                    //     rightHandJerkEstimation[i].rtU.acceleration = rightHand.LinearAcceleration;
+                    //     rightHandJerkEstimation[i].rtU.tor = 1.0 / CTX.refreshRate / 3;
+                    //     rightHandJerkEstimation[i].step();
+                    //     rightHand.LinearJerk = rightHandJerkEstimation[i].rtY.jerk;
+                    //     rightHand.LinearSnap = 0.f;
+                    //     rightHand.LinearCrackle = 0.f;
+                    //     predictedPosition[i] = handTrajectoryPrediction(rightHand, controllerDisplayTimeS);
+                    // }
 
                     AlvrDeviceMotion motion = {};
                     motion.device_id = RIGHT_HAND_ID;
                     memcpy(&motion.orientation, &right.rotation, 4 * 4);
-                    memcpy(motion.position, predictedPosition, 4 * 3);
+                    memcpy(motion.position, &right.position, 4 * 3);
                     memcpy(motion.linear_velocity, &right.velocity, 4 * 3);
                     memcpy(motion.angular_velocity, &right.angVelocity, 4 * 3);
                     motion.position[1] -= g_fTrackingOffset;
